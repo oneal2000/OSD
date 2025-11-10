@@ -23,3 +23,8 @@ check.py
 get_ex.py
 test.py
 pre.py
+
+# test files
+src/encode_doc1.py
+src/encode_doc2.py
+src/encode_task1.py
