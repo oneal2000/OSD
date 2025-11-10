@@ -1,0 +1,25 @@
+__pycache__/
+.vscode/
+log.txt
+.DS_Store
+
+base_weight/
+doc_aug/
+FT_data/
+offline*/
+output*/
+task_base_LLM*/
+data*/
+data_ret*/
+elasticsearch*/
+all_docs_dpr.json
+all_docs_kilt.json
+all_docs_test.json
+ex*.json
+
+# temp files
+check_gid.py
+check.py
+get_ex.py
+test.py
+pre.py
