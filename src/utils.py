@@ -141,7 +141,7 @@ def get_model(model_name, max_new_tokens=20):
         model_path,   
         torch_dtype=torch.float32,
         low_cpu_mem_usage=True,
-        device_map="auto", 
+        device_map="cuda:7", 
         trust_remote_code=True
     )
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)

@@ -133,8 +133,9 @@ def load_wow(data_path):
 
 
 def main(args):
-    output_dir = os.path.join(ROOT_DIR, "FT_data", args.dataset)
-    # docs_file = os.path.join(ROOT_DIR, "all_docs_kilt.json")
+    output_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+    # output_dir = os.path.join(ROOT_DIR, "FT_data", args.dataset)
+    docs_file = os.path.join(ROOT_DIR, "all_docs_kilt.json")
     os.makedirs(output_dir, exist_ok=True)
 
     print("### Loading dataset ###")
@@ -151,14 +152,14 @@ def main(args):
             json.dump(load_dataset["total"][:args.sample], fout, indent=4)
 
     for filename, dataset in solve_dataset.items():
-        # if os.path.exists(docs_file):
-        #     with open(docs_file, "r") as fin:
-        #         all_docs_list = json.load(fin)
-        #     existing_ids = {d["global_id"] for d in all_docs_list}
-        #     print(f"Loaded {len(all_docs_list)} existing docs from {docs_file}")
-        # else:
-        #     all_docs_list = []
-        #     existing_ids = set()
+        if os.path.exists(docs_file):
+            with open(docs_file, "r") as fin:
+                all_docs_list = json.load(fin)
+            existing_ids = {d["global_id"] for d in all_docs_list}
+            print(f"Loaded {len(all_docs_list)} existing docs from {docs_file}")
+        else:
+            all_docs_list = []
+            existing_ids = set()
             
         print(f"### Solving {filename} ###")
         output_file = os.path.join(
@@ -198,9 +199,9 @@ def main(args):
                     "passage": psg, 
                 }
                 final_passages.append(val)
-                # if pid not in existing_ids:
-                #     all_docs_list.append({"global_id": pid, "text": psg})
-                #     existing_ids.add(pid)
+                if pid not in existing_ids:
+                    all_docs_list.append({"global_id": pid, "text": psg})
+                    existing_ids.add(pid)
                 pbar.update(1)
                 if len(final_passages) == args.topk:
                     break
@@ -210,8 +211,8 @@ def main(args):
             with open(output_file, "w") as fout:
                 json.dump(ret, fout, indent=4)
 
-        # with open(docs_file, "w") as fout:
-        #     json.dump(all_docs_list, fout, indent=4)
+        with open(docs_file, "w") as fout:
+            json.dump(all_docs_list, fout, indent=4)
 
 
 if __name__ == "__main__":

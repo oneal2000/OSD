@@ -365,7 +365,7 @@ if __name__ == "__main__":
     parser.add_argument("--lora_rank", type=int, default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--lambda_orth", type=float, default=0.1)
-    parser.add_argument("--task_LoRA_type", type=str, choices=["strong", "weak"], default="strong")
+    parser.add_argument("--task_LoRA_type", type=str, choices=["strong", "weak"], default="weak")
     parser.add_argument("--block_size", type=int, default=1500)
     args = parser.parse_args()
     print(args)
