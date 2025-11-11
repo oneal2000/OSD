@@ -30,7 +30,7 @@ def main(args):
     cot_name = "cot" if args.with_cot else "direct"
     doc_LoRA_path = os.path.join(
         ROOT_DIR,
-        "offline_doc_without_ortho",
+        "offline_doc",
         args.model_name,
         args.dataset
     )

@@ -1,6 +1,7 @@
 __pycache__/
 .vscode/
 log.txt
+*.log
 .DS_Store
 
 base_weight/
@@ -28,3 +29,5 @@ pre.py
 src/encode_doc1.py
 src/encode_doc2.py
 src/encode_task1.py
+src/sf.py
+sf.py

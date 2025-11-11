@@ -130,7 +130,7 @@ def get_model_path(model_name):
         return "Qwen/Qwen2.5-1.5B-Instruct"
     elif model_name == "llama3.2-1b-instruct":
         return "meta-llama/Llama-3.2-1B-Instruct"
-        # return "/data-share/yeesuanAI08/zhanghanwen/models/Llama-3.2-1B-Instruct"
+        # return "/data-share/LLM/models--meta-llama--Llama-3.2-1B-Instruct"
     else:
         return model_name
 

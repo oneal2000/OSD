@@ -1,3 +1,4 @@
+# this script is for training task LoRA with 1500 samples from datasets of each task
 import os
 import gc
 import json
