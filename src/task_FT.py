@@ -1,4 +1,6 @@
 # this file is to train baseline FT_LLM and FT_RAG LoRA
+# the training process of FT_LLM uses only input-output pairs of specific dataset
+# the training process of FT_RAG uses input-output pairs and retrieved passages of specific dataset
 import os
 import gc
 import json

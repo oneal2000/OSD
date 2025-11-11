@@ -1,3 +1,5 @@
+# this script is to retrieve passages for various KILT datasets using BM25 retriever in kilt
+# TODO: add more KILT datasets
 import os
 import json
 import random

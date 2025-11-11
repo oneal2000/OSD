@@ -1,3 +1,5 @@
+# this script is to retrieve passages for various QA datasets using BM25 retriever in dpr
+# TODO: add strategy dataset
 import os
 import json
 import random

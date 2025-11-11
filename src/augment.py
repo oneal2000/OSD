@@ -1,3 +1,6 @@
+# this script is to augment documents with rewriting, QA, fact-checking, and slot-filling using LLMs
+# the format of the augmented data is as follows: rewrite + 3 qa + 3 fact-checking + 3 slot-filling + task data (1 fact-checking + 1 slot-filling + 1 open-domain QA)
+# almost same as https://github.com/oneal2000/PRAG
 import os
 import json
 import re

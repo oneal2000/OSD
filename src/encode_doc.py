@@ -1,3 +1,7 @@
+# this script is to train document-specific LoRA adapters with orthogonal regularization
+# first load the task LoRA adapter and merge it into the base model to get the task base model and save it
+# then train document LoRA adapters on augmented data with orthogonal regularization against the task LoRA adapters
+# the training process is based on the base model with the task base model
 import os
 import gc
 import sys
@@ -126,7 +130,7 @@ def get_train_data(augments, tokenizer, args):
 
     return prompt_ids
 
-
+# load the task LoRA adapter, merge it into the base model, and save the new model as the task base model
 def load_task_lora_as_base(model, task_lora_path, save_path, tokenizer=None):
     print(f"Loading task LoRA from {task_lora_path}")
     model = PeftModel.from_pretrained(model, task_lora_path)
@@ -138,7 +142,9 @@ def load_task_lora_as_base(model, task_lora_path, save_path, tokenizer=None):
     print(f"New task_base LLM saved at {save_path}")
     return model
 
-
+# orthogonal regularization loss between document LoRA and task LoRA
+# this orthogonal loss is computed on the LoRA A matrices
+# TODO: test orthogonal loss computed on LoRA B matrices
 def orthogonal_loss(model, doc_adapter_name="1", task_adapter_name="0"):
     device = next(model.parameters()).device
     loss = torch.tensor(0.0, device=device)
@@ -256,31 +262,6 @@ def main(args):
         args.model_name,
         args.dataset
     )
-
-    doc_lora_init_path = os.path.join(
-        ROOT_DIR,
-        "offline_doc",
-        args.model_name,
-        "base_weight"
-    )
-
-    # if not os.path.exists(os.path.join(doc_lora_init_path, "adapter_model.safetensors")):
-    #     peft_config = LoraConfig(
-    #         task_type=TaskType.CAUSAL_LM,
-    #         target_modules=['down_proj', 'gate_proj', 'up_proj'],
-    #         inference_mode=False,
-    #         r=args.lora_rank,
-    #         lora_alpha=args.lora_alpha,
-    #         lora_dropout=0,
-    #     )
-    #     model = get_peft_model(model, peft_config)
-    #     model.is_parallelizable = True
-    #     model.model_parallel = True
-    #     print(f'Save LoRA base weight to {doc_lora_init_path}')
-    #     os.makedirs(doc_lora_init_path, exist_ok=True)
-    #     model.save_pretrained(doc_lora_init_path)
-    #     time.sleep(2)
-    #     assert os.path.exists(os.path.join(doc_lora_init_path, "adapter_model.safetensors")) 
 
     for filename, fulldata in data_list:
         filename = filename.split('.')[0] 

@@ -1,3 +1,12 @@
+# this script includes inference methods for different settings: LLM direct, RAG, PRAG, FT_RAG, FT_LLM, parameter, parameter_weak, FT_LLM_weak
+# LLM_direct: directly use the base LLM for inference
+# RAG: use baseline RAG
+# PRAG: use baseline PRAG
+# FT_LLM: baseline: finetune LoRA with input-output for specific dataset
+# FT_RAG: baseline: finetune LoRA with input-output and passages for specific dataset
+# FT_LLM_weak: finetune LoRA with input-output for specific task, this method is the fundation for our method
+# parameter: load both task LoRA strong(LoRA trained with input-output for specific dataset) and document LoRA, merge them for inference
+# parameter_weak: this is our method: load both task LoRA weak(LoRA trained with input-output for specific task) and document LoRA, merge them for inference
 import os
 import gc
 import json

@@ -23,7 +23,6 @@ check_gid.py
 check.py
 get_ex.py
 test.py
-pre.py
 
 # test files
 src/encode_doc1.py

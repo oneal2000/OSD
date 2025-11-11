@@ -1,3 +1,5 @@
+# this script provides prompt for encode and inference
+# almost same as https://github.com/oneal2000/PRAG
 import os
 from root_dir_path import ROOT_DIR
 
