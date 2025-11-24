@@ -4,11 +4,12 @@ log.txt
 *.log
 .DS_Store
 
-base_weight/
+base_weight_llama1b/
 doc_aug/
 FT_data/
 offline*/
 output*/
+logs/
 task_base_LLM*/
 data*/
 data_ret*/
@@ -17,15 +18,18 @@ all_docs_dpr.json
 all_docs_kilt.json
 all_docs_test.json
 ex*.json
+results
 
 # temp files
 check_gid.py
 check.py
 get_ex.py
 test.py
+temp.py
 
 # test files
 src/encode_doc1.py
 src/encode_doc2.py
+src/encode_doc_test.py
 src/encode_task1.py
 src/sf.py

@@ -33,7 +33,7 @@ def load_fever(data_path):
                 }
                 new_dataset.append(val)
 
-    new_dataset = new_dataset[1000:]
+    # new_dataset = new_dataset[1000:]
     return {"total": new_dataset}
 
 
@@ -72,7 +72,7 @@ def load_zeroshot_re(data_path):
             }
             new_dataset.append(val)
 
-    new_dataset = new_dataset[1000:]
+    # new_dataset = new_dataset[1000:]
     return {"total": new_dataset}
 
 # Open domain QA
@@ -104,7 +104,7 @@ def load_triviaqa(data_path):
             }
             new_dataset.append(val)
     
-    new_dataset = new_dataset[1000:]
+    # new_dataset = new_dataset[1000:]
     return {"total": new_dataset}
 
 # Dialogue

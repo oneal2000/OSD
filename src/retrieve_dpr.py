@@ -15,7 +15,7 @@ random.seed(42)
 def load_popqa(data_path):
     data_path = os.path.join(data_path, "popQA.tsv")
     dataset = pd.read_csv(data_path, sep="\t")
-    dataset = dataset[1000:]
+    # dataset = dataset[1000:]
     new_dataset = []
     for did in range(len(dataset)):
         data = dataset.iloc[did]
@@ -34,7 +34,7 @@ def load_complexwebquestions(data_path):
     data_path = os.path.join(data_path, "ComplexWebQuestions_dev.json")
     with open(data_path, "r") as fin:
         dataset = json.load(fin)
-    dataset = dataset[1000:]
+    # dataset = dataset[1000:]
     new_dataset = []
     for did, data in enumerate(dataset):
         question = data["question"]
@@ -56,18 +56,18 @@ def load_complexwebquestions(data_path):
 def load_2wikimultihopqa(data_path):
     with open(os.path.join(data_path, "dev.json"), "r") as fin:
         dataset = json.load(fin)
-    mark_idx = {}
-    for did, data in enumerate(dataset):
-        typ = data["type"]
-        if typ not in mark_idx:
-            mark_idx[typ] = {"cnt": 1, "last_idx": did}
-        else:
-            if mark_idx[typ]["cnt"] >= 300:
-                continue
-            mark_idx[typ]["cnt"] += 1
-            mark_idx[typ]["last_idx"] = did
-    last_idx = max(v["last_idx"] for k, v in mark_idx.items())
-    dataset = dataset[last_idx + 1000:]
+    # mark_idx = {}
+    # for did, data in enumerate(dataset):
+    #     typ = data["type"]
+    #     if typ not in mark_idx:
+    #         mark_idx[typ] = {"cnt": 1, "last_idx": did}
+    #     else:
+    #         if mark_idx[typ]["cnt"] >= 300:
+    #             continue
+    #         mark_idx[typ]["cnt"] += 1
+    #         mark_idx[typ]["last_idx"] = did
+    # last_idx = max(v["last_idx"] for k, v in mark_idx.items())
+    # dataset = dataset[last_idx + 1000:]
     with open(os.path.join(data_path, "id_aliases.json"), "r") as fin:
         aliases = dict()
         for li in fin:
@@ -103,18 +103,18 @@ def load_hotpotqa(data_path):
     data_path = os.path.join(data_path, "hotpot_dev_distractor_v1.json")
     with open(data_path, "r") as fin:
         dataset = json.load(fin)
-    mark_idx = {}
-    for did, data in enumerate(dataset):
-        typ = data["type"]
-        if typ not in mark_idx:
-            mark_idx[typ] = {"cnt": 1, "last_idx": did}
-        else:
-            if mark_idx[typ]["cnt"] >= 300:
-                continue
-            mark_idx[typ]["cnt"] += 1
-            mark_idx[typ]["last_idx"] = did
-    last_idx = max(v["last_idx"] for k, v in mark_idx.items())
-    dataset = dataset[last_idx + 1000:]
+    # mark_idx = {}
+    # for did, data in enumerate(dataset):
+    #     typ = data["type"]
+    #     if typ not in mark_idx:
+    #         mark_idx[typ] = {"cnt": 1, "last_idx": did}
+    #     else:
+    #         if mark_idx[typ]["cnt"] >= 300:
+    #             continue
+    #         mark_idx[typ]["cnt"] += 1
+    #         mark_idx[typ]["last_idx"] = did
+    # last_idx = max(v["last_idx"] for k, v in mark_idx.items())
+    # dataset = dataset[last_idx + 1000:]
     new_dataset = []
     type_to_dataset = {}
     for did, data in enumerate(dataset):

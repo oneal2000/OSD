@@ -21,6 +21,7 @@ from root_dir_path import ROOT_DIR
 from utils import get_model, load_data
 import numpy as np
 import random
+from safetensors.torch import load_file
 
 seed = 42
 torch.manual_seed(seed)
@@ -142,33 +143,78 @@ def load_task_lora_as_base(model, task_lora_path, save_path, tokenizer=None):
     print(f"New task_base LLM saved at {save_path}")
     return model
 
+# helper to align module names from different model wrappers
+def _normalize_module_name(name: str) -> str:
+    if "model.layers" in name:
+        idx = name.index("model.layers")
+        return name[idx:]
+    return name
+
+
+def load_task_lora_weights(task_lora_path: str) -> Dict[str, torch.Tensor]:
+    weight_path = os.path.join(task_lora_path, "adapter_model.safetensors")
+    if not os.path.exists(weight_path):
+        raise FileNotFoundError(f"Cannot find task LoRA weights at {weight_path}")
+    state_dict = load_file(weight_path)
+    # print(state_dict)
+    allowed_suffix = {"down_proj", "gate_proj", "up_proj"}
+    task_params = {}
+    for key, tensor in state_dict.items():
+        if key.endswith("lora_A.weight"):
+            module_name = key.rsplit(".lora_A.weight", 1)[0]
+            suffix = module_name.rsplit('.', 1)[-1]
+            if suffix in allowed_suffix:
+                norm_name = _normalize_module_name(module_name)
+                task_params[norm_name] = tensor.clone()
+    return task_params
+
 # orthogonal regularization loss between document LoRA and task LoRA
 # this orthogonal loss is computed on the LoRA A matrices
 # TODO: test orthogonal loss computed on LoRA B matrices
-def orthogonal_loss(model, doc_adapter_name="1", task_adapter_name="0"):
+def orthogonal_loss(model, task_lora_params):
     device = next(model.parameters()).device
     loss = torch.tensor(0.0, device=device)
 
-    task_params = {}
-    for name, param in model.named_parameters():
-        if f".lora_A.{task_adapter_name}.weight" in name:
-            module_name = name.split(f'.lora_A.{task_adapter_name}.weight')[0]
-            task_params[module_name] = param.to(device)
+    if not task_lora_params:
+        return loss
 
+    doc_params = {}
     for name, param in model.named_parameters():
-        if f".lora_A.{doc_adapter_name}.weight" in name:
-            module_name = name.split(f'.lora_A.{doc_adapter_name}.weight')[0]
-            if module_name in task_params:
-                task_param = task_params[module_name]
-                doc_param = param.view(param.size(0), -1).to(device)
-                task_param = task_param.view(task_param.size(0), -1)
-                loss += torch.norm(doc_param.T @ task_param, p='fro') ** 2
+        if f".lora_A.default.weight" in name:
+            module_name = name.split(f".lora_A.default.weight")[0]
+            suffix = module_name.rsplit('.', 1)[-1]
+            if suffix in {"down_proj", "gate_proj", "up_proj"}:
+                # print(name)
+                norm_name = _normalize_module_name(module_name)
+                doc_params[norm_name] = param.to(device)
+
+    # for name, param in doc_params.items():
+    #     if any(s in name for s in ["down_proj", "gate_proj", "up_proj"]):
+    #         print(param)
+    #         print(f"[D] {name} sum={param.abs().sum().item():.6f}")
+
+    normalized_task = {k: v.to(device) for k, v in task_lora_params.items()}
+    # for name, param in normalized_task.items():
+    #     if any(s in name for s in ["down_proj", "gate_proj", "up_proj"]):
+    #         print(param)
+    #         print(f"[T] {name} sum={param.abs().sum().item():.6f}")
+    
+    common_modules = set(normalized_task.keys()) & set(doc_params.keys())
+    # print(common_modules)
+
+    for module_name in common_modules:
+        task_param = normalized_task[module_name]
+        doc_param = doc_params[module_name]
+        doc_flat = doc_param.view(doc_param.size(0), -1)
+        task_flat = task_param.view(task_param.size(0), -1)
+        assert doc_flat.shape == task_flat.shape, f"Shape mismatch: {doc_flat.shape} vs {task_flat.shape}"
+        loss += torch.norm(doc_flat.T @ task_flat, p='fro') ** 2 # loss is computed in this way if using A matrices to perform regularization
+        # loss += torch.norm(doc_flat @ task_flat.T, p='fro') ** 2  # TODO: loss is computed in this way if using B matrices to perform regularization
 
     return loss
 
-
 def train(model, augments,  tokenizer, args, 
-          init_adapter_path, task_path, save_path):
+          init_adapter_path, save_path, task_lora_params):
     prompt_ids = get_train_data(augments, tokenizer, args)
     train_data = TrainingData(prompt_ids, tokenizer, args)
     train_dataloader = torch.utils.data.DataLoader(
@@ -177,11 +223,13 @@ def train(model, augments,  tokenizer, args,
         collate_fn=TrainingDataCollator(tokenizer, model.device),
         shuffle=False,
     )
-    model = PeftModel.from_pretrained(model, task_path, adapter_name="0", is_trainable=False)
-    model.load_adapter(init_adapter_path, adapter_name="1", is_trainable=True)
-    model.set_adapter("1")
+    model = PeftModel.from_pretrained(model, init_adapter_path, is_trainable=True)
     model.is_parallelizable = True
     model.model_parallel = True
+    task_lora_params = {k: v.to(model.device) for k, v in task_lora_params.items()}
+    # for name, param in task_lora_params.items():
+    #     if any(s in name for s in ["down_proj", "gate_proj", "up_proj"]):
+    #         print(f"{name} sum={param.abs().sum().item():.6f}")
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     optimizer = torch.optim.AdamW(model_parameters, lr=args.learning_rate)
     for epoch in range(args.num_train_epochs):
@@ -191,9 +239,9 @@ def train(model, augments,  tokenizer, args,
             outputs = model(**batch)
             
             out_loss = outputs.loss
-            ortho = orthogonal_loss(model, doc_adapter_name="1", task_adapter_name="0")
+            ortho = orthogonal_loss(model, task_lora_params)
             loss = out_loss + args.lambda_orth * ortho
-            # loss = out_loss
+            # loss = out_loss # without orthogonal regularization
 
             loss.backward()
             optimizer.step()
@@ -204,9 +252,7 @@ def train(model, augments,  tokenizer, args,
                 "total_loss": f"{loss.item():.4f}"
             })
     os.makedirs(save_path, exist_ok=True)
-    model.save_pretrained(save_path, selected_adapters=["1"])
-    model.delete_adapter("0")
-    model.delete_adapter("1")
+    model.save_pretrained(save_path)
     model = model.unload()
     torch.cuda.empty_cache()
     gc.collect()
@@ -259,9 +305,10 @@ def main(args):
     task_base_path_weak = os.path.join(
         ROOT_DIR,
         "task_base_LLM_weak",
-        args.model_name,
-        args.dataset
+        args.task_type
     )
+
+    task_lora_cache = {}
 
     for filename, fulldata in data_list:
         filename = filename.split('.')[0] 
@@ -276,22 +323,28 @@ def main(args):
         )
 
         base_model, tokenizer, _ = get_model(args.model_name)
+        task_path_current = task_lora_path
         if args.task_LoRA_type == "strong":
-            task_path = os.path.join(task_lora_path, filename)
+            task_path_current = os.path.join(task_lora_path, filename)
             task_base_save_path = os.path.join(task_base_path, filename, args.task_LoRA_type)
-            model = load_task_lora_as_base(base_model, task_path, task_base_save_path, tokenizer)
+            model = load_task_lora_as_base(base_model, task_path_current, task_base_save_path, tokenizer)
             model, tokenizer, _ = get_model(task_base_save_path)
         else:
-            task_base_save_path = os.path.join(task_base_path_weak, filename, args.task_LoRA_type)
+            task_base_save_path = os.path.join(task_base_path_weak)
             model = load_task_lora_as_base(base_model, task_lora_path, task_base_save_path, tokenizer)
             model, tokenizer, _ = get_model(task_base_save_path)
+
+        cache_key = task_path_current
+        print(f"Loading task LoRA from {cache_key}")
+        if cache_key not in task_lora_cache:
+            task_lora_cache[cache_key] = load_task_lora_weights(cache_key)
+        task_lora_params = task_lora_cache[cache_key]
+        # print(task_lora_params)
 
         init_path = os.path.join(
             ROOT_DIR, 
             "offline_doc", 
             args.model_name, 
-            args.dataset,
-            filename,
             "base_weight"
         )
 
@@ -341,15 +394,12 @@ def main(args):
             # print(data)
             for pid in range(len(data["augment"])):
                 save_path = os.path.join(output_dir, f"data_{did}", f"passage_{pid}")
-                check_path = os.path.join(save_path, "1")
+                check_path = os.path.join(save_path)
                 if os.path.exists(os.path.join(check_path, "adapter_model.safetensors")):
                     continue
                 aug_list = data["augment"][pid]
                 # print(data["augment"][pid])
-                if args.task_LoRA_type == "strong":
-                    model = train(model, aug_list, tokenizer, args, init_path, task_path, save_path)
-                else:
-                    model = train(model, aug_list, tokenizer, args, init_path, task_lora_path, save_path)
+                model = train(model, aug_list, tokenizer, args, init_path, save_path, task_lora_params)
 
 
 if __name__ == "__main__":
@@ -360,11 +410,11 @@ if __name__ == "__main__":
     parser.add_argument("--with_cot", action="store_true")
     parser.add_argument("--sample", type=int, default=-1) # -1 means all
     parser.add_argument("--per_device_train_batch_size", type=int, default=1)
-    parser.add_argument("--num_train_epochs", type=int, default=1)
+    parser.add_argument("--num_train_epochs", type=int, default=2)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--lora_rank", type=int, default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)
-    parser.add_argument("--lambda_orth", type=float, default=0.1)
+    parser.add_argument("--lambda_orth", type=float, default=0.1) # TODO: lambda should be changed if using B matrices for orthogonal regularization
     parser.add_argument("--task_LoRA_type", type=str, choices=["strong", "weak"], default="weak")
     parser.add_argument("--block_size", type=int, default=1500)
     args = parser.parse_args()

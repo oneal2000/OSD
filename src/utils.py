@@ -129,8 +129,8 @@ def get_model_path(model_name):
     elif model_name == "qwen2.5-1.5b-instruct":
         return "Qwen/Qwen2.5-1.5B-Instruct"
     elif model_name == "llama3.2-1b-instruct":
-        return "meta-llama/Llama-3.2-1B-Instruct"
-        # return "/data-share/LLM/models--meta-llama--Llama-3.2-1B-Instruct"
+        # return "meta-llama/Llama-3.2-1B-Instruct"
+        return "/data-share/LLM/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6"
     else:
         return model_name
 
@@ -141,8 +141,9 @@ def get_model(model_name, max_new_tokens=20):
         model_path,   
         torch_dtype=torch.float32,
         low_cpu_mem_usage=True,
-        device_map="cuda:7", 
-        trust_remote_code=True
+        device_map="cuda:1", 
+        trust_remote_code=True,
+        local_files_only=True
     )
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     generation_config = dict(

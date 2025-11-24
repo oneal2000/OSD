@@ -158,7 +158,7 @@ def main(args):
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "test.json")
     else:
         data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr.json")
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr_3.json")
     data_list = load_data(None, None, None, data_dir=data_dir)
 
     with open(aug_file, "r", encoding="utf-8") as f:
