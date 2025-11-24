@@ -105,7 +105,7 @@ def main(args):
                         text = predict_sf(model, tokenizer, generation_config, 
                                         question, template_question, psgs)
                 else:   # open_domain_qa
-                    if args.inference_method in ["LLM_direct", "task_lora-only", "D-PRAG"]:
+                    if args.inference_method in ["LLM_direct", "task_lora-only"]:
                         text = predict_qa_llm(model, tokenizer, generation_config, 
                                         question, with_cot=args.with_cot)
                     else:
@@ -173,7 +173,7 @@ def main(args):
                 adapter_names.append("0")
                 # Load document LoRAs
                 for pid in range(len(passages)):
-                    adapter_path = os.path.join(doc_LoRA_path, filename, "epoch=2_lr=0.0003", f"data_{test_id}", f"passage_{pid}") # TODO: change epoch and lr if needed
+                    adapter_path = os.path.join(doc_LoRA_path, filename, "epoch=1_lr=0.0003", f"data_{test_id}", f"passage_{pid}") # TODO: change epoch and lr if needed
                     model.load_adapter(adapter_path, adapter_name = str(pid+1))
                     adapter_names.append(str(pid+1))
 
@@ -191,6 +191,9 @@ def main(args):
                 model.set_adapter("merge")
                 ret.append(get_pred(model, psgs=None))
                 model.delete_adapter("merge")
+                for pid in range(len(passages)):
+                    model.delete_adapter(str(pid+1))
+                model.delete_adapter("0")
                 model = model.unload()
                 torch.cuda.empty_cache()
                 gc.collect()

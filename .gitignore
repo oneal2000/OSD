@@ -33,3 +33,4 @@ src/encode_doc2.py
 src/encode_doc_test.py
 src/encode_task1.py
 src/sf.py
+src/temp.py
