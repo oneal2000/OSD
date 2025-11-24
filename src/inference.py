@@ -105,7 +105,7 @@ def main(args):
                         text = predict_sf(model, tokenizer, generation_config, 
                                         question, template_question, psgs)
                 else:   # open_domain_qa
-                    if args.inference_method in ["LLM_direct", "task_lora-only"]:
+                    if args.inference_method in ["LLM_direct", "task_lora-only", "D-PRAG"]:
                         text = predict_qa_llm(model, tokenizer, generation_config, 
                                         question, with_cot=args.with_cot)
                     else:
@@ -226,7 +226,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
     parser.add_argument("--task_lora_weight", type=float, default=0.5)
-    parser.add_argument("--inference_method", type=str, default="LLM_direct", choices=["FT_RAG", "FT_LLM", "LLM_direct", "RAG", "PRAG",  "task_lora-only", "D-PRAG"])
+    parser.add_argument("--inference_method", type=str, default="LLM_direct", choices=["LLM_direct", "RAG", "PRAG",  "task_lora-only", "D-PRAG"])
     # LoRA
     parser.add_argument("--lora_rank", type=int ,default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)
