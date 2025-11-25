@@ -28,12 +28,6 @@ def main(args):
     data_list = load_data(None, None, None, data_dir=data_dir)
     if args.with_cot:
         prompt_template.get_fewshot(args.dataset)
-    model, tokenizer, generation_config = get_model(
-        args.model_name,
-        max_new_tokens = args.max_new_tokens,
-    )
-    if args.with_cot:
-        prompt_template.get_fewshot(args.dataset)
     
     doc_LoRA_path = os.path.join(
         ROOT_DIR,
@@ -41,6 +35,12 @@ def main(args):
         args.model_name,
         args.dataset
     )
+    task_base_LLM_path = os.path.join(
+        ROOT_DIR,
+        "task_base_LLM_weak",
+        args.task_type,
+    )
+
     PRAG_LoRA_path = os.path.join(
         ROOT_DIR,
         "offline_prag",
@@ -63,6 +63,22 @@ def main(args):
         args.dataset,
         args.inference_method
     )
+
+    if args.inference_method == "D-PRAG": # TODO: if choose inference method D-PRAG (LLM'(LLM + task LoRA) + merge(doc LoRA))
+        model, tokenizer, generation_config = get_model(
+            task_base_LLM_path,
+            max_new_tokens = args.max_new_tokens,
+        )
+    else:
+        model, tokenizer, generation_config = get_model(
+            args.model_name,
+            max_new_tokens = args.max_new_tokens,
+        )
+    # model, tokenizer, generation_config = get_model( # TODO: if choose inference method D-PRAG (LLM + merge(task LoRA + doc LoRA))
+    #     args.model_name,
+    #     max_new_tokens = args.max_new_tokens,
+    # )
+    
     for filename, fulldata in data_list:
         filename = filename.split(".")[0]
         print(f"### Solving {filename} ###")
@@ -157,34 +173,66 @@ def main(args):
                     adapter_name = "0", 
                     is_trainable = False
                 )
+                model.set_adapter("0")
                 ret.append(get_pred(model, psgs=None))
+                model.delete_adapter("0")
                 model = model.unload()
                 torch.cuda.empty_cache()
                 gc.collect()
+            # elif args.inference_method == "D-PRAG":
+            #     adapter_names = []
+            #     # Load task LoRA
+            #     model = PeftModel.from_pretrained(
+            #         model, 
+            #         task_LoRA_path,
+            #         adapter_name = "0", 
+            #         is_trainable = False
+            #     )
+            #     adapter_names.append("0")
+            #     # Load document LoRAs
+            #     for pid in range(len(passages)):
+            #         adapter_path = os.path.join(doc_LoRA_path, filename, "epoch=2_lr=0.0003", f"data_{test_id}", f"passage_{pid}") # TODO: change epoch and lr if needed
+            #         model.load_adapter(adapter_path, adapter_name = str(pid+1))
+            #         adapter_names.append(str(pid+1))
+
+            #     task_weight = args.task_lora_weight
+            #     doc_weight = (1 - task_weight) / (len(adapter_names) - 1)
+            #     weights_list = [task_weight] + [doc_weight] * (len(adapter_names) - 1)
+                
+            #     model.add_weighted_adapter(
+            #         adapters = adapter_names,
+            #         # weights=[1 / len(adapter_names)] * len(adapter_names), # TODO: try other weighting methods if needed
+            #         weights = weights_list,
+            #         adapter_name = "merge",
+            #         combination_type = "cat",
+            #     )
+            #     model.set_adapter("merge")
+            #     ret.append(get_pred(model, psgs=None))
+            #     model.delete_adapter("merge")
+            #     for pid in range(len(passages)):
+            #         model.delete_adapter(str(pid+1))
+            #     model.delete_adapter("0")
+            #     model = model.unload()
+            #     torch.cuda.empty_cache()
+            #     gc.collect()
             elif args.inference_method == "D-PRAG":
                 adapter_names = []
-                # Load task LoRA
-                model = PeftModel.from_pretrained(
-                    model, 
-                    task_LoRA_path,
-                    adapter_name = "0", 
-                    is_trainable = False
-                )
-                adapter_names.append("0")
-                # Load document LoRAs
                 for pid in range(len(passages)):
-                    adapter_path = os.path.join(doc_LoRA_path, filename, "epoch=1_lr=0.0003", f"data_{test_id}", f"passage_{pid}") # TODO: change epoch and lr if needed
-                    model.load_adapter(adapter_path, adapter_name = str(pid+1))
-                    adapter_names.append(str(pid+1))
+                    adapter_path = os.path.join(doc_LoRA_path, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
 
-                task_weight = args.task_lora_weight
-                doc_weight = (1 - task_weight) / (len(adapter_names) - 1)
-                weights_list = [task_weight] + [doc_weight] * (len(adapter_names) - 1)
-                
                 model.add_weighted_adapter(
                     adapters = adapter_names,
-                    # weights=[1 / len(adapter_names)] * len(adapter_names), # TODO: try other weighting methods if needed
-                    weights = weights_list,
+                    weights=[1 / len(adapter_names)] * len(adapter_names),
                     adapter_name = "merge",
                     combination_type = "cat",
                 )
@@ -192,8 +240,7 @@ def main(args):
                 ret.append(get_pred(model, psgs=None))
                 model.delete_adapter("merge")
                 for pid in range(len(passages)):
-                    model.delete_adapter(str(pid+1))
-                model.delete_adapter("0")
+                    model.delete_adapter(str(pid))
                 model = model.unload()
                 torch.cuda.empty_cache()
                 gc.collect()
@@ -221,7 +268,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--with_cot", action="store_true")
     parser.add_argument("--sample", type=int, default=-1) # -1 means all
-    parser.add_argument("--num_train_epochs", type=int, default=2)
+    parser.add_argument("--num_train_epochs", type=int, default=1) # TODO: change epoch and lr if needed
     parser.add_argument("--per_device_train_batch_size", type=int, default=8)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--dropout_rate", type=float, default=0.2)

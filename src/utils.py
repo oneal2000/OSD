@@ -141,7 +141,7 @@ def get_model(model_name, max_new_tokens=20):
         model_path,   
         torch_dtype=torch.float32,
         low_cpu_mem_usage=True,
-        device_map="cuda:6", 
+        device_map="cuda:1", 
         trust_remote_code=True,
         local_files_only=True
     )
