@@ -4,7 +4,7 @@ log.txt
 *.log
 .DS_Store
 
-base_weight_llama1b/
+base_weight*/
 doc_aug/
 FT_data/
 offline*/
@@ -14,17 +14,16 @@ task_base_LLM*/
 data*/
 data_ret*/
 elasticsearch*/
-all_docs_dpr.json
-all_docs_kilt.json
-all_docs_test.json
+all_docs*.json
 ex*.json
+ex*.jsonl
 results
 
 # temp files
 check_gid.py
 check.py
 get_ex.py
-test.py
+test*.py
 temp.py
 
 # test files
@@ -32,5 +31,8 @@ src/encode_doc1.py
 src/encode_doc2.py
 src/encode_doc_test.py
 src/encode_task1.py
+src/prompt_history.py
 src/sf.py
 src/temp.py
+requirements1.txt
+src/task.py

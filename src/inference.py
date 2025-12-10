@@ -16,10 +16,10 @@ from peft import PeftModel
 
 import prompt_template
 from root_dir_path import ROOT_DIR
-from utils import get_model, evaluate, load_data, read_complete, predict, predict_qa_llm, predict_fc, predict_fc_llm, predict_sf, predict_sf_llm
+from utils import *
 
 def main(args):
-    if args.dataset in ["fever", "zeroshot_re", "triviaqa"]:
+    if args.dataset in ["fever", "zeroshot_re", "triviaqa", "wow"]:
         data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
     elif args.dataset == "test":
         data_dir = os.path.join(ROOT_DIR, "data_ret_test", args.dataset)
@@ -37,7 +37,8 @@ def main(args):
     )
     task_base_LLM_path = os.path.join(
         ROOT_DIR,
-        "task_base_LLM_weak",
+        "task_base_LLM",
+        args.model_name,
         args.task_type,
     )
 
@@ -105,7 +106,7 @@ def main(args):
 
             def get_pred(model, psgs):
                 if args.task_type == "fact_checking":
-                    if args.inference_method in ["LLM_direct", "task_lora-only", "D-PRAG"]:
+                    if args.inference_method in ["LLM_direct"]:
                         text = predict_fc_llm(model, tokenizer, generation_config, 
                                         question)
                     else:
@@ -114,14 +115,21 @@ def main(args):
                 elif args.task_type == "slot_filling":
                     template_question = data["template_question"]
                     # print(f"Template Question: {template_question}")
-                    if args.inference_method in ["LLM_direct", "task_lora-only", "D-PRAG"]:
+                    if args.inference_method in ["LLM_direct"]:
                         text = predict_sf_llm(model, tokenizer, generation_config, 
                                         question, template_question)
                     else:
                         text = predict_sf(model, tokenizer, generation_config, 
                                         question, template_question, psgs)
+                elif args.task_type == "dialogue":
+                    if args.inference_method in ["LLM_direct"]:
+                        text = predict_dialogue_llm(model, tokenizer, generation_config, 
+                                        question)
+                    else:
+                        text = predict_dialogue(model, tokenizer, generation_config, 
+                                        question, passages=psgs)
                 else:   # open_domain_qa
-                    if args.inference_method in ["LLM_direct", "task_lora-only", "D-PRAG"]:
+                    if args.inference_method in ["LLM_direct"]:
                         text = predict_qa_llm(model, tokenizer, generation_config, 
                                         question, with_cot=args.with_cot)
                     else:
@@ -133,7 +141,10 @@ def main(args):
                     "answer": answer, 
                     "text": text,
                 }
-                pred.update(evaluate(text, answer, args.with_cot))
+                if args.task_type == "dialogue":
+                    pred.update(evaluate_dialogue(text, answer))
+                else:
+                    pred.update(evaluate(text, answer, args.with_cot))
                 return pred
 
             if args.inference_method == "LLM_direct":
@@ -263,7 +274,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--task_type", type=str, required=True, choices=["open_domain_qa", "fact_checking", "slot_filling"])
+    parser.add_argument("--task_type", type=str, required=True, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue"])
     parser.add_argument("--max_new_tokens", type=int, required=True)
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--with_cot", action="store_true")

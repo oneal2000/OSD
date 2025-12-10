@@ -16,7 +16,7 @@ import prompt_template
 from root_dir_path import ROOT_DIR
 from utils import get_model, load_data
 
-from prompt_template import get_prompt, get_prompt_llm, get_prompt_fc, get_prompt_sf, get_prompt_fc_llm, get_prompt_sf_llm
+from prompt_template import *
 
 import numpy as np
 import random
@@ -78,44 +78,62 @@ def get_train_data(augments, tokenizer, args):
     psg = augments["passage"]
     for aug in augments["augment"]:
         rew = aug["rewrite"]
-        qas = aug["qa"]
-        fcs = aug["fact_checking"]
-        sfs = aug["slot_filling"]
-        qpa_cnt = (len(qas) + 1) // 2
-        if args.task_type == "open_domain_qa":
-            for qid, qa in enumerate(qas):
-                if qid < qpa_cnt:
+        if args.task_type == "dialogue":
+            dias = aug["dialogue"]
+            # print(dias)
+            dia_cnt = (len(dias) + 1) // 2
+            for did, dia in enumerate(dias):
+                if did < dia_cnt:
                     for ppp in [psg, rew]:
+                        prompt_ids.append(get_prompt_dialogue(tokenizer, dia["input"], 
+                                                        [ppp], 
+                                                        dia["output"]))
+                else:
+                    prompt_ids.append(get_prompt_dialogue(tokenizer, dia["input"], 
+                                                        None, 
+                                                        dia["output"]))
+        else:
+            qas = aug["qa"]
+            fcs = aug["fact_checking"]
+            sfs = aug["slot_filling"]
+            qpa_cnt = (len(qas) + 1) // 2
+            if args.task_type == "open_domain_qa":
+                for qid, qa in enumerate(qas):
+                    if qid < qpa_cnt:
+                        for ppp in [psg, rew]:
+                            prompt_ids.append(get_prompt(tokenizer, qa["question"], 
+                                                            [ppp], 
+                                                            qa["answer"] if not args.with_cot else qa["full_answer"], 
+                                                            with_cot=args.with_cot))
+                    else:
                         prompt_ids.append(get_prompt(tokenizer, qa["question"], 
-                                                        [ppp], 
-                                                        qa["answer"] if not args.with_cot else qa["full_answer"], 
-                                                        with_cot=args.with_cot))
-                else:
-                    prompt_ids.append(get_prompt_llm(tokenizer, qa["question"], 
-                                                    qa["answer"] if not args.with_cot else qa["full_answer"], 
-                                                    with_cot=args.with_cot))
-        elif args.task_type == "fact_checking":
-            for fid, fc in enumerate(fcs):
-                if fid < qpa_cnt:
-                    for ppp in [psg, rew]:
+                                                            None, 
+                                                            qa["answer"] if not args.with_cot else qa["full_answer"], 
+                                                            with_cot=args.with_cot))
+            elif args.task_type == "fact_checking":
+                for fid, fc in enumerate(fcs):
+                    if fid < qpa_cnt:
+                        for ppp in [psg, rew]:
+                            prompt_ids.append(get_prompt_fc(tokenizer, fc["input"], 
+                                                            [ppp], 
+                                                            fc["output"]))
+                    else:
                         prompt_ids.append(get_prompt_fc(tokenizer, fc["input"], 
-                                                        [ppp], 
-                                                        fc["output"]))
-                else:
-                    prompt_ids.append(get_prompt_fc_llm(tokenizer, fc["input"], 
-                                                        fc["output"]))
-        elif args.task_type == "slot_filling":
-            for sid, sf in enumerate(sfs):
-                # print(type(sf["template_question"]), sf["template_question"])
-                if sid < qpa_cnt:
-                    for ppp in [psg, rew]:
-                        # print([ppp])
+                                                            None, 
+                                                            fc["output"]))
+            elif args.task_type == "slot_filling":
+                for sid, sf in enumerate(sfs):
+                    # print(type(sf["template_question"]), sf["template_question"])
+                    if sid < qpa_cnt:
+                        for ppp in [psg, rew]:
+                            # print([ppp])
+                            prompt_ids.append(get_prompt_sf(tokenizer, sf["input"], 
+                                                            sf["template_question"], [ppp],
+                                                            sf["output"]))
+                    else:
                         prompt_ids.append(get_prompt_sf(tokenizer, sf["input"], 
-                                                        sf["template_question"], [ppp],
-                                                        sf["output"]))
-                else:
-                    prompt_ids.append(get_prompt_sf_llm(tokenizer, sf["input"], sf["template_question"],
-                                                        sf["output"]))
+                                                            sf["template_question"], None,
+                                                            sf["output"]))
     return prompt_ids
 
 
@@ -153,6 +171,9 @@ def main(args):
     if args.dataset in ["fever", "zeroshot_re", "triviaqa"]:
         data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt_3.json")
+    elif args.dataset == "wow":
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow.json")
     elif args.dataset == "test":
         data_dir = os.path.join(ROOT_DIR, "data_ret_test", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "test.json")
@@ -194,6 +215,11 @@ def main(args):
         model.save_pretrained(init_adapter_path)
         time.sleep(2)
         assert os.path.exists(os.path.join(init_adapter_path, "adapter_model.safetensors")) 
+
+        del model
+        torch.cuda.empty_cache()
+        gc.collect()
+        model, tokenizer, _ = get_model(args.model_name)
 
     cot_name = "cot" if args.with_cot else "direct"
     for filename, fulldata in data_list:
@@ -238,12 +264,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--task_type", type=str, default="open_domain_qa", choices=["open_domain_qa", "fact_checking", "slot_filling"])
+    parser.add_argument("--task_type", type=str, default="open_domain_qa", choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue"])
     parser.add_argument("--with_cot", action="store_true")
     parser.add_argument("--sample", type=int, default=-1) # -1 means all
     # Train
     parser.add_argument("--per_device_train_batch_size", type=int, default=1)
-    parser.add_argument("--num_train_epochs", type=int, default=2)
+    parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     # LoRA
     parser.add_argument("--lora_rank", type=int, default=2)

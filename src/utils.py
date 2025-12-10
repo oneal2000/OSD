@@ -7,7 +7,7 @@ import numpy as np
 from collections import Counter
 from typing import List, Union
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from prompt_template import get_prompt, get_prompt_llm, get_prompt_fc, get_prompt_fc_llm, get_prompt_sf, get_prompt_sf_llm
+from prompt_template import *
 
 ROOT_DIR = "/data-share/yeesuanAI08/zhanghanwen/D-PRAG"
 
@@ -123,14 +123,18 @@ def load_data(data_name, data_type, model_name, data_dir=None):
     
 
 def get_model_path(model_name):
-    if model_name == "llama3-8b-instruct": 
-        # return "meta-llama/Meta-Llama-3-8B-Instruct"
+    if model_name == "llama3.1-8b-instruct": 
+        return "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    elif model_name == "llama3-8b-instruct": 
+        # return "meta-llama/Llama-3-8B-Instruct"
         return "/data-share/yeesuanAI08/LLM/Meta-Llama-3-8B-Instruct"
     elif model_name == "qwen2.5-1.5b-instruct":
         return "Qwen/Qwen2.5-1.5B-Instruct"
+    elif model_name == "llama3.2-3b-instruct":
+        return "meta-llama/Llama-3.2-3B-Instruct"
     elif model_name == "llama3.2-1b-instruct":
-        # return "meta-llama/Llama-3.2-1B-Instruct"
-        return "/data-share/LLM/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6"
+        return "meta-llama/Llama-3.2-1B-Instruct"
+        # return "/data-share/LLM/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6"
     else:
         return model_name
 
@@ -141,7 +145,7 @@ def get_model(model_name, max_new_tokens=20):
         model_path,   
         torch_dtype=torch.float32,
         low_cpu_mem_usage=True,
-        device_map="cuda:1", 
+        device_map="auto",
         trust_remote_code=True,
         local_files_only=True
     )
@@ -206,6 +210,25 @@ def evaluate(pred, ground_truth, with_cot=False):
             if end_pos != -1:
                 pred = pred[:end_pos].strip() 
 
+    em = BaseDataset.exact_match_score(
+        prediction=pred,
+        ground_truth=ground_truth,
+    )["correct"]
+    f1_score = BaseDataset.f1_score(
+        prediction=pred,
+        ground_truth=ground_truth,
+    )
+    f1, prec, recall = f1_score["f1"], f1_score["precision"], f1_score["recall"]
+    return {
+        "eval_predict": pred,
+        "em": str(em),
+        "f1": str(f1),
+        "prec": str(prec),
+        "recall": str(recall),
+    }
+
+def evaluate_dialogue(pred, ground_truth):
+    pred = pred.strip()
     em = BaseDataset.exact_match_score(
         prediction=pred,
         ground_truth=ground_truth,
@@ -339,4 +362,42 @@ def predict_sf_llm(model, tokenizer, generation_config, input, template_question
     output = output.sequences[0][input_len:]
     text = tokenizer.decode(output, skip_special_tokens=True)
     # print(text)
+    return text
+
+def predict_dialogue(model, tokenizer, generation_config, input, passages):
+    model.eval()
+    input_ids = get_prompt_dialogue(
+        tokenizer,
+        input,
+        passages = passages)
+    input_len = len(input_ids)
+    input_text = tokenizer.decode(input_ids, skip_special_tokens=True)
+    # print(f"Input Text: {input_text}")
+    input_ids = torch.tensor(input_ids).unsqueeze(0).to(model.device)
+    with torch.no_grad():
+        output = model.generate(
+            input_ids, 
+            attention_mask = torch.ones(input_ids.shape).to(model.device),
+            **generation_config)
+    output = output.sequences[0][input_len:]
+    text = tokenizer.decode(output, skip_special_tokens=True)
+    return text
+
+def predict_dialogue_llm(model, tokenizer, generation_config, input):
+    model.eval()
+    input_ids = get_prompt_dialogue_llm(
+        tokenizer,
+        input)
+    input_len = len(input_ids)
+    input_text = tokenizer.decode(input_ids, skip_special_tokens=True)
+    # print(f"Input Text: {input_text}")
+    input_ids = torch.tensor(input_ids).unsqueeze(0).to(model.device)
+    with torch.no_grad():
+        output = model.generate(
+            input_ids, 
+            attention_mask = torch.ones(input_ids.shape).to(model.device),
+            **generation_config)
+    output = output.sequences[0][input_len:]
+    text = tokenizer.decode(output, skip_special_tokens=True)
+    # print(f"Generated Text: {text}")
     return text

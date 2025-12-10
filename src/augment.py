@@ -10,8 +10,8 @@ from tqdm import tqdm
 from utils import get_model, model_generate
 from root_dir_path import ROOT_DIR
 
-INPUT_FILE = os.path.join(ROOT_DIR, "all_docs_dpr.json")
-OUTPUT_FILE = os.path.join(ROOT_DIR, "doc_aug", "dpr_3.json")
+INPUT_FILE = os.path.join(ROOT_DIR, "all_docs_test.json")
+OUTPUT_FILE = os.path.join(ROOT_DIR, "doc_aug", "test.json")
 
 
 random.seed(42)
@@ -61,21 +61,32 @@ This list should have at least four elements\
 Passage:\n\
 {passage}"
 
+dialogue_prompt = "I will provide a passage of text from Wikipedia, and you need to generate three knowledge-grounded dialogues in the style of Wizard of Wikipedia dataset. \
+Each dialogue should be a natural, multi-turn conversation between a curious user and a knowledgeable assistant (wizard) who has access to the provided passage. \
+The assistant should provide informative, detailed responses based on the passage content, while maintaining a natural conversational flow. \
+The input should contain the conversation history (alternating user and assistant messages), and the output should be the assistant's response to the last user message. \
+Each message in the input should be separated by a newline character (\\n), except the last message. \
+The assistant's responses should be informative, engaging, and naturally incorporate information from the passage without directly copying it. \
+The user's questions should progressively explore different aspects of the topic, building upon previous turns in the conversation. \
+\nYou need to generate the dialogues in the following format: \n\
+[\n\
+    {{\n\
+        \"input\": \"hello, i like spicy food .\\nI do too especially chili peppers. They're widely used in many different types of food to add spiciness.\\nis chili pepper a specific pepper or is it a general term for all peppers\\nIt's a specific pepper originated in Mexico\\nthat make sense\\nYou'd think Dr Pepper was spicy since it has pepper in the name but is has a different unique flavor.\\nyou know I never thought about that, there should be a spicy soda\",\n\
+        \"output\": \"Jones soda might have a spicy soda, they're known for their unusual flavors.\"\n\
+    }},\n\
+]\n\n\
+Important guidelines:\n\
+- The assistant should provide detailed, informative responses based on the passage\n\
+- The conversation should feel natural and engaging, not robotic\n\
+- Each dialogue should have varied number of turns (typically 1-6 turns)\n\
+- The user's questions should explore different aspects of the topic mentioned in the passage\n\
+- The assistant's responses should synthesize information from the passage in a natural way\n\
+- Generate at least three dialogues with different conversation flows\n\
+\nYou only need to output this list in the above format.\n\
+This list should have at least three elements.\n\
+Passage:\n\
+{passage}"
 
-# od_qa_prompt = "I will provide a passage of text, and you need to generate two different questions based on the content of this passage. Each question should be answerable using the information provided in the passage. Additionally, please provide an appropriate answer for each question derived from the passage.\n\
-# You need to generate the question and answer in the following format:\n\
-# [\n\
-#     {{\n\
-#         \"input\": \"What is the capital of France?\",\n\
-#         \"output\": \"Paris\"\n\
-#     }}, \n\
-# ]\n\n\
-# This list should have at least two elements. You only need to output this list in the above format.\n\
-# But do not generate questions that are similar to the given queations.\n\
-# Passage:\n\
-# {passage}\n\
-# Questions:\n\
-# {question}"
 
 
 def fix_json(output, model_name):
@@ -186,29 +197,26 @@ def get_sf(passage, model=None, tokenizer=None, generation_config=None):
             try_times -= 1
     return False, output
 
-# def get_odqa(passage, question, model_name, model=None, tokenizer=None, generation_config=None):
-#     try_times = 100
-#     prompt = od_qa_prompt.format(passage=passage, question=question)
-#     output = None
-#     while try_times:
-#         output = model_generate(prompt, model, tokenizer, generation_config)
-#         output = fix_json(output, model_name)
-#         try:
-#             odqa = json.loads(output)
-#             if len(odqa) >= 2:
-#                 for data in odqa:
-#                     if "input" not in data or "output" not in data:
-#                         return False, odqa
-#                     if isinstance(data["output"], list):
-#                         data["output"] = ", ".join(data["output"])
-#                     if isinstance(data["output"], int):
-#                         data["output"] = str(data["output"])
-#                     if data["output"] is None:
-#                         data["output"] = "Unknown"
-#                 return True, odqa
-#         except:
-#             try_times -= 1
-#     return False, output
+def get_dialogue(passage, model=None, tokenizer=None, generation_config=None):
+    try_times = 100
+    prompt = dialogue_prompt.format(passage=passage)
+    output = None
+    while try_times:
+        output = model_generate(prompt, model, tokenizer, generation_config)
+        output = re.sub(r",\s*([\]}])", r"\1", output)
+        try:
+            dialogues = json.loads(output[output.find("["): output.rfind("]")+1])
+            if len(dialogues) >= 3:
+                dialogues = dialogues[:3]
+                for data in dialogues:
+                    if "input" not in data or "output" not in data:
+                        return False, dialogues
+                return True, dialogues
+        except:
+            print(output)
+            print(passage)
+            try_times -= 1
+    return False, output
     
 
 def main(args):
@@ -217,14 +225,17 @@ def main(args):
 
     processed = {}
     if os.path.exists(OUTPUT_FILE):
-        with open(OUTPUT_FILE, "r") as fin:
-            processed_list = json.load(fin)
-            processed = {d["global_id"]: d for d in processed_list}
+        if os.path.getsize(OUTPUT_FILE) == 0:
+            processed_list = []
+        else:
+            with open(OUTPUT_FILE, "r") as fin:
+                processed_list = json.load(fin)
+        processed = {d["global_id"]: d for d in processed_list}
         print(f" {len(processed)} Processed")
     
     model, tokenizer, _ = get_model(args.model_name)
     generation_config = dict(
-        max_new_tokens=512,
+        max_new_tokens=1024,
         return_dict_in_generate=True,
         pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0,
         temperature=0.7,
@@ -243,48 +254,55 @@ def main(args):
         doc["augment"] = []
         passage = doc["text"]
         doc_rewrite = get_rewrite(passage, args.model_name, model, tokenizer, generation_config)
-        aug_qa = get_qa(passage, args.model_name, model, tokenizer, generation_config)
-        if fix_qa(aug_qa)[0] == False: # skip error passage
+        # aug_qa = get_qa(passage, args.model_name, model, tokenizer, generation_config)
+        # if fix_qa(aug_qa)[0] == False: # skip error passage
+        #     continue
+        # aug_fc = get_fc(passage, args.model_name, model, tokenizer, generation_config)
+        # if aug_fc[0] == False: # skip error passage
+        #     continue
+        # aug_sf = get_sf(passage, model, tokenizer, generation_config)
+        # if aug_sf[0] == False: # skip error passage
+        #     continue
+        # qa_for_aug = aug_qa[:3]
+        # fc_for_aug = aug_fc[1][:3]
+        # sf_for_aug = aug_sf[1][:3]
+        # doc["augment"].append({
+        #         "rewrite": doc_rewrite,
+        #         "qa": qa_for_aug,
+        #         "fact_checking": fc_for_aug,
+        #         "slot_filling": sf_for_aug
+        #     })
+        # doc["task"] = []
+        # doc["task"].append({
+        #     "type": "fact_checking",
+        #     "data": aug_fc[1][3]
+        # })
+        # doc["task"].append({
+        #     "type": "slot_filling",
+        #     "data": aug_sf[1][3]
+        # })
+        # qa_for_task = aug_qa[3]
+        # open_domain_qa = [{
+        #     "input": qa_for_task["question"],
+        #     "output": qa_for_task["answer"],
+        #     "full_answer": qa_for_task["full_answer"]
+        # }]
+        # doc["task"].append({
+        #     "type": "open_domain_qa",
+        #     "data": open_domain_qa
+        # })
+        aug_dialogue = get_dialogue(passage, model, tokenizer, generation_config)
+        if aug_dialogue[0] == False: # skip error passage
             continue
-        aug_fc = get_fc(passage, args.model_name, model, tokenizer, generation_config)
-        if aug_fc[0] == False: # skip error passage
-            continue
-        aug_sf = get_sf(passage, model, tokenizer, generation_config)
-        if aug_sf[0] == False: # skip error passage
-            continue
-        qa_for_aug = aug_qa[:3]
-        fc_for_aug = aug_fc[1][:3]
-        sf_for_aug = aug_sf[1][:3]
+        dialogue_for_aug = aug_dialogue[1][:3]
         doc["augment"].append({
                 "rewrite": doc_rewrite,
-                "qa": qa_for_aug,
-                "fact_checking": fc_for_aug,
-                "slot_filling": sf_for_aug
+                "dialogue": dialogue_for_aug
             })
-        doc["task"] = []
-        doc["task"].append({
-            "type": "fact_checking",
-            "data": aug_fc[1][3]
-        })
-        doc["task"].append({
-            "type": "slot_filling",
-            "data": aug_sf[1][3]
-        })
-        qa_for_task = aug_qa[3]
-        open_domain_qa = [{
-            "input": qa_for_task["question"],
-            "output": qa_for_task["answer"],
-            "full_answer": qa_for_task["full_answer"]
-        }]
-        doc["task"].append({
-            "type": "open_domain_qa",
-            "data": open_domain_qa
-        })
         val = {
             "global_id": doc["global_id"],
             "passage": passage,
-            "augment": doc["augment"],
-            "task": doc["task"]
+            "augment": doc["augment"]
         }
         ret.append(val)
         pbar.update(1)

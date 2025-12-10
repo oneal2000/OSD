@@ -9,9 +9,6 @@ fewshot_path = os.path.join(ROOT_DIR, "src", "fewshot")
 
 PROMPT_FC = "You are tasked with verifying a claim using the knowledge provided below combined with your own knowledge.\n\
 Your response MUST be exactly one word: 'SUPPORTS' or 'REFUTES'. Do not output anything else and do not explain your choice.\n\
-Example:\n\
-Claim: The Eiffel Tower is located in Paris.\n\
-Output: SUPPORTS\n\n\
 Using the passages and your knowledge, output 'SUPPORTS' if the claim is true, or 'REFUTES' if the claim is false.\n\
 {passages}\n\n\
 Claim: {input}"
@@ -19,9 +16,6 @@ Claim: {input}"
 
 PROMPT_FC_LLM = "You are tasked with verifying a claim using only your own knowledge.\n\
 Your response MUST be exactly one word: 'SUPPORTS' or 'REFUTES'. Do not output anything else and do not explain your choice.\n\
-Example:\n\
-Claim: The Eiffel Tower is located in Paris.\n\
-Output: SUPPORTS\n\n\
 Based on your knowledge, output 'SUPPORTS' if the claim is true, or 'REFUTES' if the claim is false.\n\
 Claim: {input}"
 
@@ -41,6 +35,16 @@ You must return only the object entity that is directly connected to the subject
 The extracted entity should be the one that can directly serve as the answer to the question:\n\
 {template_question}\n\
 Do not provide explanations or additional text, only output the object entity.\n\
+Input: {input}"
+
+
+PROMPT_DIALOGUE = "You are tasked with generating a response to the user's last message in the whole conversation history, using the knowledge provided below combined with your own knowledge.\n\
+The input contains the entire conversation history between the user and the assistant.\n\
+{passages}\n\n\
+Input: {input}"
+
+PROMPT_DIALOGUE_LLM = "You are tasked with generating a response to the user's last message in the whole conversation history, using only your own knowledge.\n\
+The input contains the entire conversation history between the user and the assistant.\n\
 Input: {input}"
 
 
@@ -263,6 +267,51 @@ def get_prompt_sf_llm(tokenizer, input, template_question, output=None):
         output = ""
 
     user_content = PROMPT_SF_LLM.format(template_question=template_question, input = input)
+    assistant_content = ASSISTANT_PROMPT_OUTPUT.format(output=output)
+
+    messages = [{
+        "role": "user",
+        "content": user_content,
+    }]
+    inputs = tokenizer.apply_chat_template(
+        messages, 
+        add_generation_prompt=True)
+    inputs += tokenizer.encode(assistant_content, add_special_tokens=False)
+    return inputs
+
+def get_prompt_dialogue(tokenizer, input, passages=None, output=None):
+    input = input.strip()
+    if output is None:
+        output = ""
+
+    contexts = ""
+    if passages:
+        for pid, psg in enumerate(passages):
+            if isinstance(psg, dict):
+                contexts += f"Passage {pid+1}: {psg['passage']}\n"
+            else:
+                contexts += f"Passage {pid+1}: {psg}\n"
+
+    user_content = PROMPT_DIALOGUE.format(passages=contexts, input = input)
+    assistant_content = ASSISTANT_PROMPT_OUTPUT.format(output=output)
+
+    messages = [{
+        "role": "user",
+        "content": user_content,
+    }]
+    inputs = tokenizer.apply_chat_template(
+        messages, 
+        add_generation_prompt=True)
+    inputs += tokenizer.encode(assistant_content, add_special_tokens=False)
+    return inputs
+    
+
+def get_prompt_dialogue_llm(tokenizer, input, output=None):
+    input = input.strip()
+    if output is None:
+        output = ""
+
+    user_content = PROMPT_DIALOGUE_LLM.format(input = input)
     assistant_content = ASSISTANT_PROMPT_OUTPUT.format(output=output)
 
     messages = [{

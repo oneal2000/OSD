@@ -7,6 +7,7 @@ import gc
 import sys
 import time
 from typing import Optional, Any
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import json
 import argparse
 import torch
@@ -16,7 +17,7 @@ from torch.utils.data import Dataset
 from transformers import DefaultDataCollator
 from typing import Dict, List
 import prompt_template
-from prompt_template import get_prompt, get_prompt_llm, get_prompt_fc, get_prompt_fc_llm, get_prompt_sf, get_prompt_sf_llm
+from prompt_template import *
 from root_dir_path import ROOT_DIR
 from utils import get_model, load_data
 import numpy as np
@@ -34,8 +35,12 @@ class TrainingData(Dataset):
     def __init__(self, prompt_ids, tokenizer, args):
         max_length = args.block_size
         self.dataset = []
+        self.max_raw_len = 0
         pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
         for input_ids in prompt_ids:
+            raw_len = len(input_ids)
+            if raw_len > self.max_raw_len:
+                self.max_raw_len = raw_len
             labels = input_ids.copy()
             if len(input_ids) > max_length:
                 input_ids = input_ids[:max_length]
@@ -48,6 +53,9 @@ class TrainingData(Dataset):
                 "labels": labels,
                 "attention_mask": attention_mask,
             })
+
+        self.total_len = len(self.dataset)
+        print(f"Processed {self.total_len} samples. Max sequence length: {self.max_raw_len}")
 
     def __len__(self):
         return len(self.dataset)
@@ -75,7 +83,7 @@ def get_train_data(augments, tokenizer, args):
     prompt_ids = []
     psg = augments["passage"]
 
-    qas, fcs, sfs = [], [], []
+    qas, fcs, sfs, dias= [], [], [], []
     qpa_cnt = 0
 
     rew = augments["rewrite"]
@@ -88,6 +96,9 @@ def get_train_data(augments, tokenizer, args):
     elif args.task_type == "slot_filling":
         sfs = augments["slot_filling"]
         qpa_cnt = (len(sfs) + 1) // 2
+    elif args.task_type == "dialogue":
+        dias = augments["dialogue"]
+        qpa_cnt = (len(dias) + 1) // 2
     
 
     if args.task_type == "open_domain_qa":
@@ -105,13 +116,14 @@ def get_train_data(augments, tokenizer, args):
                     )
             else:
                 prompt_ids.append(
-                    get_prompt_llm(
-                        tokenizer,
-                        qa["question"],
-                        qa["answer"] if not args.with_cot else qa["full_answer"],
-                        with_cot=args.with_cot,
+                        get_prompt(
+                            tokenizer,
+                            qa["question"],
+                            None,
+                            qa["answer"] if not args.with_cot else qa["full_answer"],
+                            with_cot=args.with_cot,
+                        )
                     )
-                )
 
     elif args.task_type == "fact_checking":
         for fid, fc in enumerate(fcs):
@@ -119,7 +131,7 @@ def get_train_data(augments, tokenizer, args):
                 for ppp in [psg, rew]:
                     prompt_ids.append(get_prompt_fc(tokenizer, fc["input"], [ppp], fc["output"]))
             else:
-                prompt_ids.append(get_prompt_fc_llm(tokenizer, fc["input"], fc["output"]))
+                prompt_ids.append(get_prompt_fc(tokenizer, fc["input"], None, fc["output"]))
 
     elif args.task_type == "slot_filling":
         for sid, sf in enumerate(sfs):
@@ -127,7 +139,16 @@ def get_train_data(augments, tokenizer, args):
                 for ppp in [psg, rew]:
                     prompt_ids.append(get_prompt_sf(tokenizer, sf["input"], sf["template_question"], [ppp], sf["output"]))
             else:
-                prompt_ids.append(get_prompt_sf_llm(tokenizer, sf["input"], sf["template_question"], sf["output"]))
+                prompt_ids.append(get_prompt_sf(tokenizer, sf["input"], sf["template_question"], None, sf["output"]))
+
+    elif args.task_type == "dialogue":
+        for did, dia in enumerate(dias):
+            if did < qpa_cnt:
+                for ppp in [psg, rew]:
+                    prompt_ids.append(get_prompt_dialogue(tokenizer, dia["input"], [ppp], dia["output"]))
+            else:
+                prompt_ids.append(get_prompt_dialogue(tokenizer, dia["input"], None, dia["output"]))
+                        
 
     return prompt_ids
 
@@ -263,6 +284,9 @@ def main(args):
     if args.dataset in ["fever", "zeroshot_re", "triviaqa"]:
         data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt_3.json")
+    elif args.dataset == "wow":
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow.json")
     else:
         data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr.json")
@@ -304,7 +328,8 @@ def main(args):
 
     task_base_path_weak = os.path.join(
         ROOT_DIR,
-        "task_base_LLM_weak",
+        "task_base_LLM",
+        args.model_name,
         args.task_type
     )
 
@@ -366,13 +391,19 @@ def main(args):
             time.sleep(2)
             assert os.path.exists(os.path.join(init_path, "adapter_model.safetensors")) 
 
+            del model
+            torch.cuda.empty_cache()
+            gc.collect()
+            model, tokenizer, _ = get_model(task_base_save_path)
+
         os.makedirs(output_dir, exist_ok=True)
         fulldata = fulldata if args.sample == -1 else fulldata[:args.sample]
         for did, data in tqdm(enumerate(fulldata), total=len(fulldata)):
             task_field_map = {
                 "open_domain_qa": "qa",
                 "fact_checking": "fact_checking",
-                "slot_filling": "slot_filling"
+                "slot_filling": "slot_filling",
+                "dialogue": "dialogue"
             }
 
             passages = data["passages"]
@@ -410,13 +441,13 @@ if __name__ == "__main__":
     parser.add_argument("--with_cot", action="store_true")
     parser.add_argument("--sample", type=int, default=-1) # -1 means all
     parser.add_argument("--per_device_train_batch_size", type=int, default=1)
-    parser.add_argument("--num_train_epochs", type=int, default=2)
+    parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--lora_rank", type=int, default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--lambda_orth", type=float, default=0.1) # TODO: lambda should be changed if using B matrices for orthogonal regularization
     parser.add_argument("--task_LoRA_type", type=str, choices=["strong", "weak"], default="weak")
-    parser.add_argument("--block_size", type=int, default=1500)
+    parser.add_argument("--block_size", type=int, default=500)
     args = parser.parse_args()
     print(args)
     main(args)

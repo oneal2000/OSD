@@ -50,9 +50,10 @@ class TrainingData(Dataset):
                         with_cot=args.with_cot
                     )
                 else:
-                    prompt_ids = prompt_template.get_prompt_llm(
+                    prompt_ids = prompt_template.get_prompt(
                         tokenizer=tokenizer, 
                         question=question,
+                        passages=None, 
                         answer=None,
                         with_cot=args.with_cot
                     )
@@ -65,9 +66,25 @@ class TrainingData(Dataset):
                         output=None
                     )
                 else: # LLM
-                    prompt_ids = prompt_template.get_prompt_fc_llm(
+                    prompt_ids = prompt_template.get_prompt_fc(
                         tokenizer=tokenizer, 
-                        input=data["input"],
+                        input=data["input"], 
+                        passages=None,
+                        output=None
+                    )
+            elif args.task_type == "dialogue":
+                if args.LoRA_type == "RAG":
+                    prompt_ids = prompt_template.get_prompt_dialogue(
+                        tokenizer=tokenizer, 
+                        input=data["input"], 
+                        passages=data["passages"],
+                        output=None
+                    )
+                else: # LLM
+                    prompt_ids = prompt_template.get_prompt_dialogue(
+                        tokenizer=tokenizer, 
+                        input=data["input"], 
+                        passages=None,
                         output=None
                     )
             elif args.task_type == "slot_filling":
@@ -80,10 +97,11 @@ class TrainingData(Dataset):
                         output=None
                     )
                 else: # LLM
-                    prompt_ids = prompt_template.get_prompt_sf_llm(
+                    prompt_ids = prompt_template.get_prompt_sf(
                         tokenizer=tokenizer, 
-                        input=data["input"],
+                        input=data["input"], 
                         template_question=data["template_question"],
+                        passages=None,
                         output=None
                     )
 
@@ -143,7 +161,7 @@ class TrainingDataCollator(DefaultDataCollator):
         }
 
 def main(args):
-    input_file = os.path.join(ROOT_DIR, "doc_aug", "sampled_1500.json")
+    input_file = os.path.join(ROOT_DIR, "doc_aug", "sampled_wow.json")
     with open(input_file, "r") as f:
         input_data = json.load(f)
 
@@ -165,11 +183,23 @@ def main(args):
                     elif args.task_type == "slot_filling":
                         sample["answer"] = item["output"]
                         sample["template_question"] = item["template_question"]
+                    elif args.task_type == "dialogue":
+                        sample["answer"] = item["output"]
                     else: # fact_checking
                         sample["answer"] = item["output"]
                     training_samples.append(sample)
 
     print(f"Extracted {len(training_samples)} samples for task type: '{args.task_type}'")
+
+    if args.task_type == "fact_checking":
+        supports = [s for s in training_samples if s["answer"].strip().upper() == "SUPPORTS"]
+        refutes = [s for s in training_samples if s["answer"].strip().upper() == "REFUTES"]
+        min_count = min(len(supports), len(refutes))
+        random.shuffle(supports)
+        random.shuffle(refutes)
+        training_samples = supports[:min_count] + refutes[:min_count]
+        random.shuffle(training_samples)
+        print(f"Balanced fact_checking samples: SUPPORTS={min_count}, REFUTES={min_count}")
     
     if args.sample > 0:
         random.shuffle(training_samples)
@@ -194,6 +224,11 @@ def main(args):
         os.makedirs(init_path, exist_ok=True)
         model.save_pretrained(init_path)
         time.sleep(2)
+
+        del model
+        torch.cuda.empty_cache()
+        gc.collect()
+        model, tokenizer, _ = get_model(args.model_name)
 
     random.shuffle(training_samples)
     split_idx = int(len(training_samples) * 0.9)
@@ -277,7 +312,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--task_type", type=str, choices=["open_domain_qa", "fact_checking", "slot_filling"], required=True)
+    parser.add_argument("--task_type", type=str, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue"], required=True)
     parser.add_argument("--LoRA_type", type=str, default="LLM", choices=["RAG", "LLM"])
     parser.add_argument("--with_cot", action="store_true")
     
@@ -286,7 +321,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
-    parser.add_argument("--block_size", type=int, default=500)
+    parser.add_argument("--block_size", type=int, default=300)
     parser.add_argument("--sample", type=int, default=-1)
     
     # LoRA arguments
