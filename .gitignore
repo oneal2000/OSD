@@ -5,6 +5,7 @@ log.txt
 .DS_Store
 
 base_weight*/
+scripts/
 doc_aug/
 FT_data/
 offline*/
@@ -31,6 +32,8 @@ src/encode_doc1.py
 src/encode_doc2.py
 src/encode_doc_test.py
 src/encode_task1.py
+src/encode_test.py
+src/calc_sim.py
 src/prompt_history.py
 src/sf.py
 src/temp.py

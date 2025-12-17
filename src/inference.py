@@ -65,7 +65,7 @@ def main(args):
         args.inference_method
     )
 
-    if args.inference_method == "D-PRAG": # TODO: if choose inference method D-PRAG (LLM'(LLM + task LoRA) + merge(doc LoRA))
+    if args.inference_method == "D-PRAG" or args.inference_method == "D-PRAG-combine": # TODO: if choose inference method D-PRAG (LLM'(LLM + task LoRA) + merge(doc LoRA))
         model, tokenizer, generation_config = get_model(
             task_base_LLM_path,
             max_new_tokens = args.max_new_tokens,
@@ -177,6 +177,32 @@ def main(args):
                 model = model.unload()
                 torch.cuda.empty_cache()
                 gc.collect()
+            elif args.inference_method == "PRAG-combine":
+                adapter_names = []
+                for pid in range(len(passages)):
+                    adapter_path = os.path.join(PRAG_LoRA_path, filename, f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
+                model.add_weighted_adapter(
+                    adapters = adapter_names,
+                    weights=[1 / len(adapter_names)] * len(adapter_names),
+                    adapter_name = "merge",
+                    combination_type = "cat",
+                )
+                model.set_adapter("merge")
+                ret.append(get_pred(model, psgs=passages))
+                model.delete_adapter("merge")
+                model = model.unload()
+                torch.cuda.empty_cache()
+                gc.collect()
             elif args.inference_method == "task_lora-only":
                 model = PeftModel.from_pretrained(
                     model, 
@@ -255,6 +281,35 @@ def main(args):
                 model = model.unload()
                 torch.cuda.empty_cache()
                 gc.collect()
+            elif args.inference_method == "D-PRAG-combine":
+                adapter_names = []
+                for pid in range(len(passages)):
+                    adapter_path = os.path.join(doc_LoRA_path, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
+
+                model.add_weighted_adapter(
+                    adapters = adapter_names,
+                    weights=[1 / len(adapter_names)] * len(adapter_names),
+                    adapter_name = "merge",
+                    combination_type = "cat",
+                )
+                model.set_adapter("merge")
+                ret.append(get_pred(model, psgs=passages))
+                model.delete_adapter("merge")
+                for pid in range(len(passages)):
+                    model.delete_adapter(str(pid))
+                model = model.unload()
+                torch.cuda.empty_cache()
+                gc.collect()
                 
             with open(predict_file, "w") as fout:
                 json.dump(ret, fout, indent=4)
@@ -284,7 +339,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
     parser.add_argument("--task_lora_weight", type=float, default=0.5)
-    parser.add_argument("--inference_method", type=str, default="LLM_direct", choices=["LLM_direct", "RAG", "PRAG",  "task_lora-only", "D-PRAG"])
+    parser.add_argument("--inference_method", type=str, default="LLM_direct", choices=["LLM_direct", "RAG", "PRAG", "PRAG-combine", "task_lora-only", "D-PRAG","D-PRAG-combine"])
     # LoRA
     parser.add_argument("--lora_rank", type=int ,default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)

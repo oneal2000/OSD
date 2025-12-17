@@ -229,8 +229,11 @@ def orthogonal_loss(model, task_lora_params):
         doc_flat = doc_param.view(doc_param.size(0), -1)
         task_flat = task_param.view(task_param.size(0), -1)
         assert doc_flat.shape == task_flat.shape, f"Shape mismatch: {doc_flat.shape} vs {task_flat.shape}"
-        loss += torch.norm(doc_flat.T @ task_flat, p='fro') ** 2 # loss is computed in this way if using A matrices to perform regularization
-        # loss += torch.norm(doc_flat @ task_flat.T, p='fro') ** 2  # TODO: loss is computed in this way if using B matrices to perform regularization
+        # loss += torch.norm(doc_flat.T @ task_flat, p='fro') ** 2 # loss is computed in this way if using A matrices to perform regularization
+        doc_result = doc_flat @ doc_flat.T
+        task_result = task_flat @ task_flat.T
+        current_loss = torch.trace(doc_result @ task_result)
+        loss = loss + current_loss
 
     return loss
 
@@ -238,16 +241,17 @@ def train(model, augments,  tokenizer, args,
           init_adapter_path, save_path, task_lora_params):
     prompt_ids = get_train_data(augments, tokenizer, args)
     train_data = TrainingData(prompt_ids, tokenizer, args)
-    train_dataloader = torch.utils.data.DataLoader(
-        train_data,
-        batch_size=args.per_device_train_batch_size,
-        collate_fn=TrainingDataCollator(tokenizer, model.device),
-        shuffle=False,
-    )
     model = PeftModel.from_pretrained(model, init_adapter_path, is_trainable=True)
     model.is_parallelizable = True
     model.model_parallel = True
-    task_lora_params = {k: v.to(model.device) for k, v in task_lora_params.items()}
+    device = next(model.parameters()).device
+    train_dataloader = torch.utils.data.DataLoader(
+        train_data,
+        batch_size=args.per_device_train_batch_size,
+        collate_fn=TrainingDataCollator(tokenizer, device),
+        shuffle=False,
+    )
+    task_lora_params = {k: v.to(device) for k, v in task_lora_params.items()}
     # for name, param in task_lora_params.items():
     #     if any(s in name for s in ["down_proj", "gate_proj", "up_proj"]):
     #         print(f"{name} sum={param.abs().sum().item():.6f}")
@@ -370,7 +374,8 @@ def main(args):
             ROOT_DIR, 
             "offline_doc", 
             args.model_name, 
-            "base_weight"
+            "base_weight",
+            args.task_type
         )
 
         if not os.path.exists(os.path.join(init_path, "adapter_model.safetensors")):
