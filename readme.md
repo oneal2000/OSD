@@ -1,103 +1,103 @@
-## 仓库使用指导
+### 环境创建
 
-**此github仓库仅用于ANN课程项目开发及提交**
-**11.10发现我的requirements好像存在版本冲突，所以直接使用/data-share/miniconda3/envs/re_z环境先进行实验，最后所有实验做完了我们再解决环境版本的问题**
-**先下载代码，然后我向你们的文件夹下面复制要用的数据就行了**
-
-### dpr及open-domain qa数据集下载
-参考PRAG仓库说明：  
-https://github.com/oneal2000/PRAG   
-
-### kilt数据集下载及处理
-KILT官方github仓库  
-https://github.com/facebookresearch/KILT   
-通过官方github仓库下载并处理kilt数据集，可以得到一个kilt.jsonl文件  
-然后使用pre.py对其进行处理得到一个可以用来retrieve的简化的jsonl文件kilt_pre.jsonl文件
-
-### elasticsearch来建立索引
-参考PRAG仓库说明  
-使用的elasticsearch版本是8.15.0  
-处理dpr数据集时，使用prep_elastic_dpr.py建立索引  
+```bash
+conda create -n dprag python=3.10
+conda activate dprag
+pip install -r requirements.txt
 ```
+
+### 数据集下载
+
+有关 KILT 相关数据集获取参考 [KILT](https://github.com/facebookresearch/KILT)，按照官方仓库的分段文件处理为`kilt.jsonl`之后使用`src/pre.py`进行处理得到`kilt_pre.jsonl`。  
+有关 PubmedQA 数据集获取参考 [PubmedQA](https://github.com/pubmedqa/pubmedqa)，经过数据处理可以得到`pubmed.jsonl`，此数据集可见链接[pubmed.jsonl](https://www.dropbox.com/scl/fi/u0ne41rznvy5b3kchhxx7/pubmed.jsonl?rlkey=fk0bqnclk2eyyhg8oz5arx81d&e=1&st=ub9dp3h9&dl=0)
+
+### ElasticSearch
+
+为DPR准备ElasticSearch索引
+```bash
+cd data_dpr
+wget -O elasticsearch-8.15.0.tar.gz https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.15.0-linux-x86_64.tar.gz  # download Elasticsearch
+tar zxvf elasticsearch-8.15.0.tar.gz
+rm elasticsearch-8.15.0.tar.gz 
+cd elasticsearch-8.15.0
+nohup bin/elasticsearch &  # run Elasticsearch in background
+cd ../..
 python prep_elastic.py --data_path data/dpr/psgs_w100.tsv --index_name wiki
 ```
-处理kilt数据集时，使用prep_elastic_kilt.py建立索引  
+为KILT准备索引，下载elasticsearch-8.15.0并后台运行的方法同上，不再赘述。
+```bash
+python prep_elastic_kilt.py --data_path kilt_pre.jsonl --index_name kilt
 ```
-python prep_elastic.py --data_path kilt_pre.jsonl --index_name kilt
+为PubMed准备索引，下载elasticsearch-8.15.0并后台运行的方法同上，不再赘述。
+```bash
+python prep_elastic_med.py --data_path pubmed.jsonl --index_name med
 ```
 
-### 检索代码运行
-处理dpr数据集时，使用src/retrieve_dpr.py进行检索  
-```
+下载数据集：  
+可按照报告中给出的数据集链接直接下载。  
+将下载好的数据集按照如下方法分类放置：  
+- data_dpr:2wikimultihopqa,popqa,hotpotqa,complexwebquestions
+- data_kilt:fever,zeroshot_re,wow
+- data_med:pubmedqa
+
+### 代码运行
+
+首先修改`src/root_dir_path`为此文件夹的目录路径。
+
+#### 数据检索
+在创建好ElasticSearch索引并下载好数据集后，运行以下命令进行数据检索：
+```bash
 python src/retrieve_dpr.py --dataset <dataset_name> --data_path data_dpr/<dataset_name>/ --topk 3 --sample 300
-```
-最后会在data_ret_dpr/<dataset_name>/目录下生成检索结果文件，同时会在all_docs_dpr.json文件中保存dpr中所有被检索到的文档。    
-处理kilt数据集时，使用src/retrieve_kilt.py进行检索  
-```
-python src/retrieve_kilt.py --dataset <dataset_name> --data_path data_kilt/<dataset_name>/ --topk 3 --sample 300
-```
-最后会在data_ret_kilt/<dataset_name>/目录下生成检索结果文件，同时会在all_docs_kilt.json文件中保存kilt中所有被检索到的文档。    
 
-### 数据增强
-这个数据增强的代码写的不是很好，默认是在dpr和qa上进行增强，如果想要在kilt的另外两个数据集上增强，就要首先要把代码里面的
-```
-INPUT_FILE = os.path.join(ROOT_DIR, "all_docs_dpr.json")
-OUTPUT_FILE = os.path.join(ROOT_DIR, "doc_aug", "dpr_3.json")
-```
-切换成
-```
-INPUT_FILE = os.path.join(ROOT_DIR, "all_docs_kilt.json")
-OUTPUT_FILE = os.path.join(ROOT_DIR, "doc_aug", "kilt_3.json")
-```
-**注意，如果扩展了新的数据集，比如strategyqa，可以修改上述文件路径单独为strategy进行检索和增强，比如创建一个data_starategy文件夹和一个all_docs_strategyqa就行，不需要把之前所有的数据再检索或者增强一遍，然后之后的所有步骤对这个数据集进行路径的特判即可，我们先跑出来结果再把代码改的可读和规范**   
+python src/retrieve_kilt.py --dataset <dataset_name> --data_path data_dpr/<dataset_name>/ --topk 3 --sample 300
 
-**注意，扩展了新的数据集之后这里面读数据集的函数可能要根据数据集的名称和特点重写**  
-
-
-### task_LoRA生成
-
-使用src/encode_task.py进行task_LoRA的生成
-
-**注意，这里有可能跑出来效果不好，但是很有可能是因为LoRA初始化参数碰巧不是很好，我这边有1b模型初始化效果很好的baseweight，但是3b模型依旧可能遇到这个问题，所以跑完之后先在inference中跑一下FT_LLM_weak方法，如果效果比LLM_direct差就重开，这个跑一次是比较快的，如果5次还烂那可能有点问题，可以在群里讨论**
-
-```
-python src/encode_task.py --model_name llama3.2-1b-instruct --task_type <task_type>
-```
-注意，我建议里面其他的参数全部按照我的默认设置，如有需要之后再改
-
-
-### doc_LoRA生成
-
-使用src/encode_doc.py进行doc_LoRA的生成
-
-**注意，我们这个阶段所有task_LoRA_type都选择weak！！！**
-
-这里的方法是先把task_LoRA加载到base model上生成一个新的base model，然后再用这个新的base model去生成doc_LoRA
-
-```
-python src/encode_doc.py --model_name llama3.2-1b-instruct --dataset <dataset_name> --task_type <task_type>
+python src/retrieve_med.py --dataset <dataset_name> --data_path data_dpr/<dataset_name>/ --topk 3 --sample 300
 ```
 
-可以在这里修改epoch和learning rate等参数，别的参数先不改了
+#### 数据增强
+```bash
+python src/augment.py
+```
+默认使用`llama3-8b-instruct`进行数据增强，如需更换模型，请在`src/augment.py`中修改`model_name`并在`src/utils.py`中添加对应模型的加载方法。
 
+#### PRAG训练
+```bash
+python src/encode.py --model_name <model_name> --dataset <dataset_name> --task_type <task_type>
+```
+默认学习率为1e-3，epoch为1，部分数据集的参数有改动，设置可见说明部分。  
 
-### baseline怎么跑
+#### task_lora训练
+```bash
+python src/encode_task.py --model_name <model_name> --task_type <task_type>
+```
+默认学习率为1e-4，epoch为1，部分任务类型有改动，设置可见说明部分。
 
-#### LLM_direct
+#### doc_lora训练
+```bash
+python src/encode_doc.py --model_name <model_name> --dataset <dataset_name> --task_type <task_type>
+```
+默认学习率为1e-3，epoch为1，lambda_orth为0.1，部分数据集的参数有改动，设置可见说明部分。
 
-直接在src/inference.py中，选择inference_method="LLM_direct"即可，其他参数根据需要修改。
+#### 推理
+```bash
+python src/inference.py --model_name <model_name> --dataset <dataset_name>  --task_type <task_type> --inference_method <method> --max_new_tokens <num>
+```
+其中method包括`LLM_direct`, `RAG`, `PRAG`, `D-PRAG`, `D-PRAG-combine`。`max_new_tokens`默认使用20，epoch和学习率与PRAG和D-PRAG encode阶段选择的参数保持一致，部分数据集的参数改动在说明部分。
 
-#### RAG
+### 说明
 
-直接在src/inference.py中，选择inference_method="RAG"即可，其他参数根据需要修改。   
-
-#### PRAG
-
-- 首先，使用src/encode.py对增强后的文档进行编码，生成LoRA，具体命令可参考PRAG仓库说明。  
-- 然后，使用src/inference.py中，选择inference_method="PRAG"即可，其他参数根据需要修改。  
-
-#### LLM_FT和RAG_FT
-
-- 首先，使用src/task_FT.py生成LoRA
-- 然后，使用src/inference.py中，选择inference_method="FT_LLM"或者"inference_method="FT_RAG"即可，其他参数根据需要修改。
-
+- 在训练LoRA时为排除参数影响，统一数据集的PRAG和D-PRAG的学习率等参数均保持一致，后面除lambda_orth以及inference和task_lora训练阶段的参数其余参数均在PRAG和D-PRAG中保持一致。
+- 2wikimultihopqa和hotpotqa在LLM_direct，RAG，PRAG和PRAG-combine推理时采取PRAG论文中with_cot的方法，D-PRAG及D-PRAG-combine在1b和3b模型上不采用with_cot方法，在8b模型上采用with_cot方法。
+- 训练过程参数有改动的数据集：
+    - hotpotqa在8b模型上训练doc_lora时选择lambda_orth为0.05
+    - popqa在3种规模的模型上训练doc_lora的epoch均为2
+    - fact_checking的task_lora在1b模型上选择epoch为3，在3b模型上选择学习率为8e-5
+    - fever数据集在3b模型上训练doc_lora时选择lambda_orth为0.05，学习率选择1e-4，在8b模型上选择学习率为5e-5
+    - zeroshot_re的训练epoch选择2，在3b和8b模型上学习率选择5e-4
+    - dialogue-generation的task_lora在1b和3b模型上选择epoch=2
+    - wow在训练doc_lora时三种模型上的epoch均为2
+    - pubmedqa在3b模型上训练doc_lora时选择epoch为2
+- 推理过程参数有改动的数据集：
+    - 2wikimultihopqa和hotpotqa的max_new_tokens选择128
+    - wow的max_new_tokens选择32
+- 如您在复现实验结果时遇到任何问题，请随时与我们组的任何一位同学联系，谢谢！

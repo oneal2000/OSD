@@ -39,3 +39,4 @@ src/sf.py
 src/temp.py
 requirements1.txt
 src/task.py
+src/prompt_history.py
