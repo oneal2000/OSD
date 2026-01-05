@@ -334,7 +334,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--task_type", type=str, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", , "pubmedqa"], required=True)
+    parser.add_argument("--task_type", type=str, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "pubmedqa"], required=True)
     parser.add_argument("--LoRA_type", type=str, default="LLM", choices=["RAG", "LLM"])
     parser.add_argument("--with_cot", action="store_true")
     
