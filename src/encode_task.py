@@ -104,6 +104,21 @@ class TrainingData(Dataset):
                         passages=None,
                         output=None
                     )
+            elif args.task_type == "pubmedqa":
+                question = data["question"]
+                if args.LoRA_type == "RAG":
+                    prompt_ids = prompt_template.get_prompt_pubmedqa(
+                        tokenizer=tokenizer,
+                        question=question,
+                        passages=data["passages"],
+                        answer=None
+                    )
+                else:  # LLM
+                    prompt_ids = prompt_template.get_prompt_pubmedqa_llm(
+                        tokenizer=tokenizer,
+                        question=question,
+                        answer=None
+                    )
 
             answer = data["answer"]
             answer_ids = tokenizer.encode(answer, add_special_tokens=False)
@@ -174,19 +189,26 @@ def main(args):
                 task_data_list = task["data"] if isinstance(task["data"], list) else [task["data"]]
                 
                 for item in task_data_list:
-                    sample = {
-                        "passages": [passage],
-                        "input": item["input"],
-                    }
-                    if args.task_type == "open_domain_qa":
-                        sample["answer"] = item["full_answer"] if args.with_cot else item["output"]
-                    elif args.task_type == "slot_filling":
-                        sample["answer"] = item["output"]
-                        sample["template_question"] = item["template_question"]
-                    elif args.task_type == "dialogue":
-                        sample["answer"] = item["output"]
-                    else: # fact_checking
-                        sample["answer"] = item["output"]
+                    if args.task_type == "pubmedqa":
+                        sample = {
+                            "passages": [passage],
+                            "question": item["question"],
+                            "answer": item["answer"],  
+                        }
+                    else:
+                        sample = {
+                            "passages": [passage],
+                            "input": item["input"],
+                        }
+                        if args.task_type == "open_domain_qa":
+                            sample["answer"] = item["full_answer"] if args.with_cot else item["output"]
+                        elif args.task_type == "slot_filling":
+                            sample["answer"] = item["output"]
+                            sample["template_question"] = item["template_question"]
+                        elif args.task_type == "dialogue":
+                            sample["answer"] = item["output"]
+                        else: # fact_checking
+                            sample["answer"] = item["output"]
                     training_samples.append(sample)
 
     print(f"Extracted {len(training_samples)} samples for task type: '{args.task_type}'")
@@ -312,7 +334,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--task_type", type=str, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue"], required=True)
+    parser.add_argument("--task_type", type=str, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", , "pubmedqa"], required=True)
     parser.add_argument("--LoRA_type", type=str, default="LLM", choices=["RAG", "LLM"])
     parser.add_argument("--with_cot", action="store_true")
     

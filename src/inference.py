@@ -23,6 +23,8 @@ def main(args):
         data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
     elif args.dataset == "test":
         data_dir = os.path.join(ROOT_DIR, "data_ret_test", args.dataset)
+    elif args.dataset == "pubmedqa":
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
     else:
         data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
     data_list = load_data(None, None, None, data_dir=data_dir)
@@ -128,6 +130,17 @@ def main(args):
                     else:
                         text = predict_dialogue(model, tokenizer, generation_config, 
                                         question, passages=psgs)
+                elif args.task_type == "pubmedqa":
+                    if args.inference_method == "LLM_direct":
+                        text = predict_pubmedqa_llm(
+                            model, tokenizer, generation_config,
+                            question
+                        )
+                    else:
+                        text = predict_pubmedqa(
+                            model, tokenizer, generation_config,
+                            question, passages=psgs
+                        )
                 else:   # open_domain_qa
                     if args.inference_method in ["LLM_direct"]:
                         text = predict_qa_llm(model, tokenizer, generation_config, 
@@ -143,6 +156,8 @@ def main(args):
                 }
                 if args.task_type == "dialogue":
                     pred.update(evaluate_dialogue(text, answer))
+                elif args.task_type == "pubmedqa":
+                    pred.update(evaluate(text, answer, with_cot=False))
                 else:
                     pred.update(evaluate(text, answer, args.with_cot))
                 return pred
@@ -329,7 +344,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--task_type", type=str, required=True, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue"])
+    parser.add_argument("--task_type", type=str, required=True, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "pubmedqa"])
     parser.add_argument("--max_new_tokens", type=int, required=True)
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--with_cot", action="store_true")

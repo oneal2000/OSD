@@ -61,6 +61,24 @@ This list should have at least four elements\
 Passage:\n\
 {passage}"
 
+
+pubmedqa_prompt_template = (
+    "I will provide a passage. "
+    "Based ONLY on the factual content of the passage, generate four yes/no questions.\n\n"
+    "Each question must be objectively answerable as 'yes' or 'no' based on the passage.\n"
+    "For each question, provide the correct answer as exactly one lowercase word: 'yes' or 'no'.\n\n"
+    "The output format must be a JSON list like this:\n"
+    "[\n"
+    "  {{\n"
+    "    \"question\": \"...\",\n"
+    "    \"answer\": \"yes\"\n"
+    "  }}\n"
+    "]\n\n"
+    "This list must contain at least four elements.\n\n"
+    "Passage:\n{passage}\n"
+)
+
+
 dialogue_prompt = "I will provide a passage of text from Wikipedia, and you need to generate three knowledge-grounded dialogues in the style of Wizard of Wikipedia dataset. \
 Each dialogue should be a natural, multi-turn conversation between a curious user and a knowledgeable assistant (wizard) who has access to the provided passage. \
 The assistant should provide informative, detailed responses based on the passage content, while maintaining a natural conversational flow. \
@@ -197,6 +215,34 @@ def get_sf(passage, model=None, tokenizer=None, generation_config=None):
             try_times -= 1
     return False, output
 
+
+def get_pubmedqa(passage, model_name, model=None, tokenizer=None, generation_config=None):
+    try_times = 100
+    prompt = pubmedqa_prompt_template.format(passage=passage)
+    output = None
+
+    while try_times:
+        output = model_generate(prompt, model, tokenizer, generation_config)
+        output = fix_json(output, model_name)
+
+        try:
+            data = json.loads(output)
+            if len(data) >= 4:
+                data = data[:4]
+                for item in data:
+                    if "question" not in item or "answer" not in item:
+                        return False, data
+                    if item["answer"] not in ["yes", "no"]:
+                        return False, data
+                return True, data
+        except:
+            try_times -= 1
+            print(output)
+            print(passage)
+
+    return False, output
+
+
 def get_dialogue(passage, model=None, tokenizer=None, generation_config=None):
     try_times = 100
     prompt = dialogue_prompt.format(passage=passage)
@@ -291,18 +337,28 @@ def main(args):
         #     "type": "open_domain_qa",
         #     "data": open_domain_qa
         # })
+        aug_pubmedqa = get_pubmedqa(passage, args.model_name, model, tokenizer, generation_config)
+        if aug_pubmedqa[0] == False:
+            continue
+        doc["task"].append({
+            "type": "pubmedqa",
+            "data": aug_pubmedqa[1][3]
+        })
+        pubmedqa_for_aug = aug_pubmedqa[1][:3]
         aug_dialogue = get_dialogue(passage, model, tokenizer, generation_config)
         if aug_dialogue[0] == False: # skip error passage
             continue
         dialogue_for_aug = aug_dialogue[1][:3]
         doc["augment"].append({
                 "rewrite": doc_rewrite,
-                "dialogue": dialogue_for_aug
+                "dialogue": dialogue_for_aug,
+                "pubmedqa": pubmedqa_for_aug
             })
         val = {
             "global_id": doc["global_id"],
             "passage": passage,
-            "augment": doc["augment"]
+            "augment": doc["augment"],
+            "task": doc["task"]
         }
         ret.append(val)
         pbar.update(1)

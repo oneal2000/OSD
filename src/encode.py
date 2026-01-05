@@ -134,6 +134,30 @@ def get_train_data(augments, tokenizer, args):
                         prompt_ids.append(get_prompt_sf(tokenizer, sf["input"], 
                                                             sf["template_question"], None,
                                                             sf["output"]))
+            elif args.task_type == "pubmedqa":
+                pubqas = aug["pubmedqa"]
+                qpa_cnt = (len(pubqas) + 1) // 2
+
+                for pid, pq in enumerate(pubqas):
+                    if pid < qpa_cnt:
+                        for ppp in [psg, rew]:
+                            prompt_ids.append(
+                                get_prompt_pubmedqa(
+                                    tokenizer,
+                                    question=pq["question"],
+                                    passages=[ppp],
+                                    answer=pq["answer"], 
+                                )
+                            )
+                    else:
+                        prompt_ids.append(
+                            get_prompt_pubmedqa(
+                                tokenizer,
+                                question=pq["question"],
+                                passages=None,
+                                answer=pq["answer"],
+                            )
+                        )
     return prompt_ids
 
 
@@ -177,6 +201,9 @@ def main(args):
     elif args.dataset == "test":
         data_dir = os.path.join(ROOT_DIR, "data_ret_test", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "test.json")
+    elif args.dataset == "pubmedqa":
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "pub_3.json")
     else:
         data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr_3.json")
@@ -264,7 +291,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--task_type", type=str, default="open_domain_qa", choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue"])
+    parser.add_argument("--task_type", type=str, default="open_domain_qa", choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "pubmedqa"])
     parser.add_argument("--with_cot", action="store_true")
     parser.add_argument("--sample", type=int, default=-1) # -1 means all
     # Train

@@ -48,6 +48,21 @@ The input contains the entire conversation history between the user and the assi
 Input: {input}"
 
 
+PROMPT_PUBMEDQA = "You are tasked with answering a medical yes/no question using the knowledge provided below combined with your own medical knowledge.\n\
+Your response MUST be exactly one word: 'yes' or 'no'. Do not output anything else and do not explain your choice.\n\
+Using the passages and your knowledge, Output 'yes' if it is true, otherwise output 'no'.\n\
+{passages}\n\n\
+Question: {question}\n\
+Answer:"
+
+
+PROMPT_PUBMEDQA_LLM = "You are tasked with answering a medical yes/no question using only your own medical knowledge.\n\
+Your response MUST be exactly one word: 'yes' or 'no'. Do not output anything else and do not explain your choice.\n\
+Based on your knowledge, Output 'yes' if it is true, otherwise output 'no'.\n\
+Question: {question}\n\
+Answer:"
+
+
 USER_PROMPT = "You should answer the question by referring to the knowledge provided below and integrating your own knowledge.\n\
 {passages}\n\n\
 Question: {question}"
@@ -73,6 +88,7 @@ ASSISTANT_PROMPT = "The answer is {answer}"
 ASSISTANT_PROMPT_WITH_COT = "Answer: {answer}"
 
 ASSISTANT_PROMPT_OUTPUT = "Output: {output}"
+ASSISTANT_PROMPT_ANSWER = "Answer: {answer}"
 
 def _get_prompt(question, passages=None, answer=None):
     question = question.strip()
@@ -278,6 +294,79 @@ def get_prompt_sf_llm(tokenizer, input, template_question, output=None):
         add_generation_prompt=True)
     inputs += tokenizer.encode(assistant_content, add_special_tokens=False)
     return inputs
+    
+
+def get_prompt_pubmedqa(tokenizer, question, passages=None, answer=None):
+    question = question.strip()
+    if not question.endswith('?'):
+        question += "?"
+    elif question.endswith(' ?'):
+        question = (question[:-1]).strip() + "?"
+
+    if answer is None:
+        answer = ""
+
+    if passages and not isinstance(passages, list):
+        passages = [passages]
+
+    contexts = ""
+    if passages:
+        for pid, psg in enumerate(passages):
+            if isinstance(psg, dict):
+                contexts += f"Passage {pid+1}: {psg['passage']}\n"
+            else:
+                contexts += f"Passage {pid+1}: {psg}\n"
+
+    user_content = PROMPT_PUBMEDQA.format(
+        passages=contexts,
+        question=question,
+    )
+    # print(user_content)
+
+    assistant_content = ASSISTANT_PROMPT_ANSWER.format(answer=answer)
+
+    messages = [{
+        "role": "user",
+        "content": user_content,
+    }]
+
+    inputs = tokenizer.apply_chat_template(
+        messages,
+        add_generation_prompt=True
+    )
+    inputs += tokenizer.encode(assistant_content, add_special_tokens=False)
+    return inputs
+
+
+def get_prompt_pubmedqa_llm(tokenizer, question, answer=None):
+    question = question.strip()
+    if not question.endswith('?'):
+        question += "?"
+    elif question.endswith(' ?'):
+        question = (question[:-1]).strip() + "?"
+
+    if answer is None:
+        answer = ""
+
+    user_content = PROMPT_PUBMEDQA_LLM.format(
+        question=question,
+    )
+    # print(user_content)
+
+    assistant_content = ASSISTANT_PROMPT_ANSWER.format(answer=answer)
+
+    messages = [{
+        "role": "user",
+        "content": user_content,
+    }]
+
+    inputs = tokenizer.apply_chat_template(
+        messages,
+        add_generation_prompt=True
+    )
+    inputs += tokenizer.encode(assistant_content, add_special_tokens=False)
+    return inputs
+
 
 def get_prompt_dialogue(tokenizer, input, passages=None, output=None):
     input = input.strip()

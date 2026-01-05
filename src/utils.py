@@ -365,6 +365,57 @@ def predict_sf_llm(model, tokenizer, generation_config, input, template_question
     text = tokenizer.decode(output, skip_special_tokens=True)
     # print(text)
     return text
+    
+def predict_pubmedqa(model, tokenizer, generation_config, question, passages):
+    model.eval()
+
+    input_ids = get_prompt_pubmedqa(
+        tokenizer=tokenizer,
+        question=question,
+        passages=passages,
+    )
+
+    input_len = len(input_ids)
+    input_ids = torch.tensor(input_ids).unsqueeze(0).to(model.device)
+
+    with torch.no_grad():
+        output = model.generate(
+            input_ids,
+            attention_mask=torch.ones(input_ids.shape).to(model.device),
+            **generation_config
+        )
+
+    text = tokenizer.decode(
+        output.sequences[0][input_len:],
+        skip_special_tokens=True
+    ).strip()
+
+    return text
+
+def predict_pubmedqa_llm(model, tokenizer, generation_config, question):
+    model.eval()
+
+    input_ids = get_prompt_pubmedqa_llm(
+        tokenizer=tokenizer,
+        question=question,
+    )
+
+    input_len = len(input_ids)
+    input_ids = torch.tensor(input_ids).unsqueeze(0).to(model.device)
+
+    with torch.no_grad():
+        output = model.generate(
+            input_ids,
+            attention_mask=torch.ones(input_ids.shape).to(model.device),
+            **generation_config
+        )
+
+    text = tokenizer.decode(
+        output.sequences[0][input_len:],
+        skip_special_tokens=True
+    ).strip()
+
+    return text
 
 def predict_dialogue(model, tokenizer, generation_config, input, passages):
     model.eval()

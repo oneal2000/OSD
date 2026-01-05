@@ -83,7 +83,7 @@ def get_train_data(augments, tokenizer, args):
     prompt_ids = []
     psg = augments["passage"]
 
-    qas, fcs, sfs, dias= [], [], [], []
+    qas, fcs, sfs, dias, pubmedqas= [], [], [], [], []
     qpa_cnt = 0
 
     rew = augments["rewrite"]
@@ -99,8 +99,10 @@ def get_train_data(augments, tokenizer, args):
     elif args.task_type == "dialogue":
         dias = augments["dialogue"]
         qpa_cnt = (len(dias) + 1) // 2
+    elif args.task_type == "pubmedqa":
+        pubmedqas = augments["pubmedqa"]
+        qpa_cnt = (len(pubmedqas) + 1) // 2
     
-
     if args.task_type == "open_domain_qa":
         for qid, qa in enumerate(qas):
             if qid < qpa_cnt:
@@ -140,6 +142,28 @@ def get_train_data(augments, tokenizer, args):
                     prompt_ids.append(get_prompt_sf(tokenizer, sf["input"], sf["template_question"], [ppp], sf["output"]))
             else:
                 prompt_ids.append(get_prompt_sf(tokenizer, sf["input"], sf["template_question"], None, sf["output"]))
+
+    elif args.task_type == "pubmedqa":
+        for pid, qa in enumerate(pubmedqas):
+            if pid < qpa_cnt:
+                for ppp in [psg, rew]:
+                    prompt_ids.append(
+                        get_prompt(
+                            tokenizer,
+                            qa["question"],
+                            [ppp],
+                            qa["answer"]
+                        )
+                    )
+            else:
+                prompt_ids.append(
+                    get_prompt(
+                        tokenizer,
+                        qa["question"],
+                        None,
+                        qa["answer"]
+                    )
+                )
 
     elif args.task_type == "dialogue":
         for did, dia in enumerate(dias):
@@ -291,6 +315,9 @@ def main(args):
     elif args.dataset == "wow":
         data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow.json")
+    elif args.dataset == "pubmedqa":
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "pub_3.json") 
     else:
         data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr.json")
@@ -408,7 +435,8 @@ def main(args):
                 "open_domain_qa": "qa",
                 "fact_checking": "fact_checking",
                 "slot_filling": "slot_filling",
-                "dialogue": "dialogue"
+                "dialogue": "dialogue",
+                "pubmedqa" : "pubmedqa"
             }
 
             passages = data["passages"]

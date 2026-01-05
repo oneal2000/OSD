@@ -208,6 +208,12 @@ bm25_retriever_kilt = BM25(
     engine="elasticsearch"
 )
 
+bm25_retriever_med = BM25(
+    tokenizer=tokenizer,
+    index_name="med",
+    engine="elasticsearch"
+)
+
 def bm25_retrieve(question, topk):
     docs_ids, docs = bm25_retriever.retrieve(
         [question], 
@@ -218,6 +224,14 @@ def bm25_retrieve(question, topk):
 
 def bm25_retrieve_kilt(question, topk):
     docs_ids, docs = bm25_retriever_kilt.retrieve(
+        [question], 
+        topk=topk, 
+        max_query_length=256
+    )
+    return docs_ids[0].tolist(), docs[0].tolist()
+
+def bm25_retrieve_med(question, topk):
+    docs_ids, docs = bm25_retriever_med.retrieve(
         [question], 
         topk=topk, 
         max_query_length=256
