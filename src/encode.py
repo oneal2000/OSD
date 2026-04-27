@@ -1,5 +1,4 @@
-# This file is to train baseline PRAG LoRA
-# almost same as https://github.com/oneal2000/PRAG
+# This script is to implement the PRAG baseline
 import os
 import gc
 import time
@@ -194,27 +193,33 @@ def train(question, augments, args, model, tokenizer,
 
 
 def main(args):
-    # if args.dataset in ["fever", "zeroshot_re", "triviaqa"]:
-    #     data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
-    #     aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt_3.json")
     if args.dataset == "fever":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "fever_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
+        if os.path.exists(kilt_aug_file):
+            aug_file = kilt_aug_file
+        else:
+            aug_file = os.path.join(ROOT_DIR, "doc_aug", "fever.json")
     elif args.dataset == "zeroshot_re":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "zsre_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
+        if os.path.exists(kilt_aug_file):
+            aug_file = kilt_aug_file
+        else:
+            aug_file = os.path.join(ROOT_DIR, "doc_aug", "zsre.json")
     elif args.dataset == "wow":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow_top10.json")
-    elif args.dataset == "test":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_test", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "test.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
+        if os.path.exists(kilt_aug_file):
+            aug_file = kilt_aug_file
+        else:
+            aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow.json")
     elif args.dataset == "pubmedqa":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_pub10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "med_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "pub.json")
     else:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr.json")
     data_list = load_data(None, None, None, data_dir=data_dir)
 
     with open(aug_file, "r", encoding="utf-8") as f:

@@ -44,16 +44,15 @@ def load_pubmedqa(data_path):
 
 
 def main(args):
-    output_dir = os.path.join(ROOT_DIR, "data_ret_pub10", "pubmedqa")
-    docs_file = os.path.join(ROOT_DIR, "all_docs_med10.json")
+    output_dir = os.path.join(ROOT_DIR, "data_ret_pub", "pubmedqa")
+    docs_file = os.path.join(ROOT_DIR, "all_docs_med.json")
     os.makedirs(output_dir, exist_ok=True)
 
     print("### Loading MedQA ###")
     load_dataset = load_pubmedqa(args.data_path)
-    solve_dataset = load_dataset  # only total
+    solve_dataset = load_dataset
 
     for filename, dataset in solve_dataset.items():
-        # load existing docs (avoid duplicates)
         if os.path.exists(docs_file):
             with open(docs_file, "r") as fin:
                 all_docs_list = json.load(fin)

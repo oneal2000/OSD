@@ -1,18 +1,12 @@
-# this script is to train document-specific LoRA adapters with orthogonal regularization
-# first load the task LoRA adapter and merge it into the base model to get the task base model and save it
-# then train document LoRA adapters on augmented data with orthogonal regularization against the task LoRA adapters
-# the training process is based on the base model with the task base model
 import os
 import gc
 import sys
 import time
-from typing import Optional, Any
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import json
 import argparse
 import torch
 from tqdm import tqdm
-from peft import TaskType, get_peft_model, LoraConfig, PeftModel, PeftMixedModel, PeftMixedModel
+from peft import TaskType, get_peft_model, LoraConfig, PeftModel
 from torch.utils.data import Dataset
 from transformers import DefaultDataCollator
 from typing import Dict, List
@@ -176,7 +170,6 @@ def get_train_data(augments, tokenizer, args):
 
     return prompt_ids
 
-# load the task LoRA adapter, merge it into the base model, and save the new model as the task base model
 def load_task_lora_as_base(model, task_lora_path, save_path, tokenizer=None):
     print(f"Loading task LoRA from {task_lora_path}")
     model = PeftModel.from_pretrained(model, task_lora_path)
@@ -188,7 +181,6 @@ def load_task_lora_as_base(model, task_lora_path, save_path, tokenizer=None):
     print(f"New task_base LLM saved at {save_path}")
     return model
 
-# helper to align module names from different model wrappers
 def _normalize_module_name(name: str) -> str:
     if "model.layers" in name:
         idx = name.index("model.layers")
@@ -213,9 +205,6 @@ def load_task_lora_weights(task_lora_path: str) -> Dict[str, torch.Tensor]:
                 task_params[norm_name] = tensor.clone()
     return task_params
 
-# orthogonal regularization loss between document LoRA and task LoRA
-# this orthogonal loss is computed on the LoRA A matrices
-# TODO: test orthogonal loss computed on LoRA B matrices
 def orthogonal_loss(model, task_lora_params):
     device = next(model.parameters()).device
     loss = torch.tensor(0.0, device=device)
@@ -253,7 +242,6 @@ def orthogonal_loss(model, task_lora_params):
         doc_flat = doc_param.view(doc_param.size(0), -1)
         task_flat = task_param.view(task_param.size(0), -1)
         assert doc_flat.shape == task_flat.shape, f"Shape mismatch: {doc_flat.shape} vs {task_flat.shape}"
-        # loss += torch.norm(doc_flat.T @ task_flat, p='fro') ** 2 # loss is computed in this way if using A matrices to perform regularization
         doc_result = doc_flat @ doc_flat.T
         task_result = task_flat @ task_flat.T
         current_loss = torch.trace(doc_result @ task_result)
@@ -297,7 +285,7 @@ def train(model, augments,  tokenizer, args,
             out_loss = outputs.loss
             ortho = orthogonal_loss(model, task_lora_params)
             loss = out_loss + args.lambda_orth * ortho
-            # loss = out_loss # without orthogonal regularization
+            # loss = out_loss
 
             if first_out_loss is None and first_ortho_loss is None:
                 first_out_loss = out_loss.item()
@@ -324,20 +312,32 @@ def train(model, augments,  tokenizer, args,
 
 def main(args):
     if args.dataset == "fever":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "fever_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
+        if os.path.exists(kilt_aug_file):
+            aug_file = kilt_aug_file
+        else:
+            aug_file = os.path.join(ROOT_DIR, "doc_aug", "fever.json")
     elif args.dataset == "zeroshot_re":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "zsre_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
+        if os.path.exists(kilt_aug_file):
+            aug_file = kilt_aug_file
+        else:
+            aug_file = os.path.join(ROOT_DIR, "doc_aug", "zsre.json")
     elif args.dataset == "wow":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
+        if os.path.exists(kilt_aug_file):
+            aug_file = kilt_aug_file
+        else:
+            aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow.json")
     elif args.dataset == "pubmedqa":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_pub10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "med_top10.json") 
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "pub.json") 
     else:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr.json")
     data_list = load_data(None, None, None, data_dir=data_dir)
 
     with open(aug_file, "r", encoding="utf-8") as f:
@@ -347,18 +347,15 @@ def main(args):
 
     if args.with_cot:
         prompt_template.get_fewshot(args.dataset)
-
-    
     
     task_lora_path = os.path.join(
             ROOT_DIR,
             "offline_task",
             args.model_name,
-            args.task_type,
-            "LLM"
+            args.task_type
         )
 
-    task_base_path_weak = os.path.join(
+    task_base_path = os.path.join(
         ROOT_DIR,
         "task_base_LLM",
         args.model_name,
@@ -382,7 +379,7 @@ def main(args):
 
         base_model, tokenizer, _ = get_model(args.model_name)
         task_path_current = task_lora_path
-        task_base_save_path = os.path.join(task_base_path_weak)
+        task_base_save_path = os.path.join(task_base_path)
         model = load_task_lora_as_base(base_model, task_lora_path, task_base_save_path, tokenizer)
         model, tokenizer, _ = get_model(task_base_save_path)
 
@@ -511,7 +508,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--lora_rank", type=int, default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)
-    parser.add_argument("--lambda_orth", type=float, default=0.1) # TODO: lambda should be changed if using B matrices for orthogonal regularization
+    parser.add_argument("--lambda_orth", type=float, default=0.1)
     parser.add_argument("--task_LoRA_type", type=str, choices=["strong", "weak"], default="weak")
     parser.add_argument("--block_size", type=int, default=500)
     args = parser.parse_args()

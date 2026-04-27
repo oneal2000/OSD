@@ -5,44 +5,15 @@ log.txt
 .DS_Store
 
 base_weight*/
-scripts/
-doc_aug/
-FT_data/
+doc_aug*/
 offline*/
 output*/
-logs/
 task_base_LLM*/
 data*/
-data_ret*/
-elasticsearch*/
 all_docs/
 all_docs*.json
-ex*.json
-ex*.jsonl
-results
 figures*/
+src1/
+logs/
+test.py
 
-# temp files
-check_gid.py
-check.py
-get_ex.py
-test*.py
-temp.py
-
-# test files
-src/encode_doc1.py
-src/encode_doc2.py
-src/encode_doc_test.py
-src/encode_doc_rand.py
-src/encode_task1.py
-src/encode_test.py
-src/calc_sim.py
-src/prompt_history.py
-src/augment_test.py
-src/calc_top300.py
-src/sf.py
-src/temp.py
-requirements1.txt
-src/task.py
-src/prompt_history.py
-src/draw.py

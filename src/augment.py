@@ -4,13 +4,7 @@ import re
 import random
 import argparse
 from tqdm import tqdm
-from copy import deepcopy
 from utils import get_model, model_generate
-from root_dir_path import ROOT_DIR
-
-# INPUT_FILE = os.path.join(ROOT_DIR, "all_docs_test.json")
-# INPUT_FILE = args.input_file
-# OUTPUT_FILE = os.path.join(ROOT_DIR, "doc_aug", "test.json")
 
 
 random.seed(42)
@@ -265,15 +259,18 @@ def get_dialogue(passage, model=None, tokenizer=None, generation_config=None):
     
 
 def main(args):
-    with open(INPUT_FILE, "r") as fin:
+    with open(args.input_file, "r") as fin:
         docs = json.load(fin)
 
+    input_basename = os.path.basename(args.input_file)
+    is_med_file = input_basename == "all_docs_med.json"
+
     processed = {}
-    if os.path.exists(OUTPUT_FILE):
-        if os.path.getsize(OUTPUT_FILE) == 0:
+    if os.path.exists(args.output_file):
+        if os.path.getsize(args.output_file) == 0:
             processed_list = []
         else:
-            with open(OUTPUT_FILE, "r") as fin:
+            with open(args.output_file, "r") as fin:
                 processed_list = json.load(fin)
         processed = {d["global_id"]: d for d in processed_list}
         print(f" {len(processed)} Processed")
@@ -295,79 +292,75 @@ def main(args):
     for doc in docs:
         if doc["global_id"] in done_ids:
             continue
-        # print(f"Processing doc {doc['global_id']}")
-        doc["augment"] = []
         passage = doc["text"]
-        
 
-        doc_rewrite = get_rewrite(passage, args.model_name, model, tokenizer, generation_config)
-        # aug_qa = get_qa(passage, args.model_name, model, tokenizer, generation_config)
-        # if fix_qa(aug_qa)[0] == False: # skip error passage
-        #     continue
-        # aug_fc = get_fc(passage, args.model_name, model, tokenizer, generation_config)
-        # if aug_fc[0] == False: # skip error passage
-        #     continue
-        # aug_sf = get_sf(passage, model, tokenizer, generation_config)
-        # if aug_sf[0] == False: # skip error passage
-        #     continue
-        aug_dialogue = get_dialogue(passage, model, tokenizer, generation_config)
-        if aug_dialogue[0] == False: # skip error passage
-            continue
-        # aug_pubmedqa = get_pubmedqa(passage, args.model_name, model, tokenizer, generation_config)
-        # if aug_pubmedqa[0] == False:
-        #     continue
-        # qa_for_aug = aug_qa[:3]
-        # fc_for_aug = aug_fc[1][:3]
-        # sf_for_aug = aug_sf[1][:3]
-        dialogue_for_aug = aug_dialogue[1][:3]
-        # pubmedqa_for_aug = aug_pubmedqa[1][:3]
-        doc["augment"].append({
+        if is_med_file:
+            doc_rewrite = get_rewrite(passage, args.model_name, model, tokenizer, generation_config)
+            aug_pubmedqa = get_pubmedqa(passage, args.model_name, model, tokenizer, generation_config)
+            if aug_pubmedqa[0] == False:
+                continue
+            aug_result = {"rewrite": doc_rewrite, "pubmedqa": aug_pubmedqa[1][:3]}
+            doc["augment"] = [aug_result]
+            doc["task"] = [{
+                "type": "pubmedqa",
+                "data": aug_pubmedqa[1][3]
+            }]
+        else:
+            doc_rewrite = get_rewrite(passage, args.model_name, model, tokenizer, generation_config)
+            aug_qa = get_qa(passage, args.model_name, model, tokenizer, generation_config)
+            if fix_qa(aug_qa)[0] == False:
+                continue
+            aug_fc = get_fc(passage, args.model_name, model, tokenizer, generation_config)
+            if aug_fc[0] == False:
+                continue
+            aug_sf = get_sf(passage, model, tokenizer, generation_config)
+            if aug_sf[0] == False:
+                continue
+            aug_dialogue = get_dialogue(passage, model, tokenizer, generation_config)
+            if aug_dialogue[0] == False:
+                continue
+            aug_result = {
                 "rewrite": doc_rewrite,
-                # "qa": qa_for_aug,
-                # "fact_checking": fc_for_aug,
-                # "slot_filling": sf_for_aug,
-                "dialogue": dialogue_for_aug,
-                # "pubmedqa": pubmedqa_for_aug
-            })
-        # doc["task"] = []
-        # doc["task"].append({
-        #     "type": "fact_checking",
-        #     "data": aug_fc[1][3]
-        # })
-        # doc["task"].append({
-        #     "type": "slot_filling",
-        #     "data": aug_sf[1][3]
-        # })
-        # qa_for_task = aug_qa[3]
-        # open_domain_qa = [{
-        #     "input": qa_for_task["question"],
-        #     "output": qa_for_task["answer"],
-        #     "full_answer": qa_for_task["full_answer"]
-        # }]
-        # doc["task"].append({
-        #     "type": "open_domain_qa",
-        #     "data": open_domain_qa
-        # })
-        # doc["task"].append({
-        #     "type": "pubmedqa",
-        #     "data": aug_pubmedqa[1][3]
-        # })
-        # doc["task"].append({
-        #     "type": "dialogue",
-        #     "data": aug_dialogue[1][3]
-        # })
+                "qa": aug_qa[:3],
+                "fact_checking": aug_fc[1][:3],
+                "slot_filling": aug_sf[1][:3],
+                "dialogue": aug_dialogue[1][:3],
+            }
+            doc["augment"] = [aug_result]
+            doc["task"] = [
+                {
+                    "type": "fact_checking",
+                    "data": aug_fc[1][3]
+                },
+                {
+                    "type": "slot_filling",
+                    "data": aug_sf[1][3]
+                },
+                {
+                    "type": "open_domain_qa",
+                    "data": [{
+                        "input": aug_qa[3]["question"],
+                        "output": aug_qa[3]["answer"],
+                        "full_answer": aug_qa[3]["full_answer"]
+                    }]
+                },
+                {
+                    "type": "dialogue",
+                    "data": aug_dialogue[1][3]
+                },
+            ]
         val = {
             "global_id": doc["global_id"],
             "passage": passage,
             "augment": doc["augment"],
-            # "task": doc["task"]
+            "task": doc["task"]
         }
         ret.append(val)
         pbar.update(1)
 
-        os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-        
-        with open(OUTPUT_FILE, "w") as fout:
+        os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
+
+        with open(args.output_file, "w") as fout:
             json.dump(ret, fout, indent=4)
 
 
@@ -379,6 +372,4 @@ if __name__ == "__main__":
     parser.add_argument("--output_file", type=str)
     args = parser.parse_args()
     print(args)
-    INPUT_FILE = args.input_file
-    OUTPUT_FILE = args.output_file
     main(args)

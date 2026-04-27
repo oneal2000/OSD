@@ -9,8 +9,7 @@ from collections import Counter
 from typing import List, Union
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from prompt_template import *
-
-ROOT_DIR = "/data-share/yeesuanAI08/zhanghanwen/D-PRAG"
+from root_dir_path import ROOT_DIR
 
 DATA_ROOT_DIR = os.path.join(ROOT_DIR, "data_aug")
 
@@ -125,19 +124,13 @@ def load_data(data_name, data_type, model_name, data_dir=None):
 
 def get_model_path(model_name):
     if model_name == "llama3.1-8b-instruct": 
-        # return "meta-llama/Meta-Llama-3.1-8B-Instruct"
-        return "/data-share/yeesuanAI08/LLM/Meta-Llama-3.1-8B-Instruct"
+        return "meta-llama/Meta-Llama-3.1-8B-Instruct"
     elif model_name == "llama3-8b-instruct": 
-        # return "meta-llama/Llama-3-8B-Instruct"
-        return "/data-share/yeesuanAI08/LLM/Meta-Llama-3-8B-Instruct"
-    elif model_name == "qwen2.5-1.5b-instruct":
-        return "Qwen/Qwen2.5-1.5B-Instruct"
+        return "meta-llama/Llama-3-8B-Instruct"
     elif model_name == "llama3.2-3b-instruct":
-        # return "meta-llama/Llama-3.2-3B-Instruct"
-        return "/data-share/yeesuanAI08/zhanghanwen/LLM/llama3.2-3b-instruct"
+        return "meta-llama/Llama-3.2-3B-Instruct"
     elif model_name == "llama3.2-1b-instruct":
-        # return "meta-llama/Llama-3.2-1B-Instruct"
-        return "/data-share/LLM/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6"
+        return "meta-llama/Llama-3.2-1B-Instruct"
     else:
         return model_name
 

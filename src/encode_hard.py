@@ -2,8 +2,6 @@ import os
 import gc
 import sys
 import time
-from typing import Optional, Any
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import json
 import argparse
 import torch
@@ -214,7 +212,6 @@ def compute_null_space_basis(A_T: torch.Tensor, r_doc: int, tol: float = 1e-5) -
     U, S, Vh = torch.linalg.svd(A_T.float(), full_matrices=True)
     effective_rank = (S > tol).sum().item()
 
-    # Null space basis = the right singular vectors NOT in the row space of A_T
     N = Vh[effective_rank:]  # (d - effective_rank, d)
     null_dim = N.shape[0]
 
@@ -230,11 +227,6 @@ def compute_null_space_basis(A_T: torch.Tensor, r_doc: int, tol: float = 1e-5) -
 
 class NullSpaceLoraA(nn.Module):
     def __init__(self, null_basis: torch.Tensor, rank: int):
-        """
-        Args:
-            null_basis: (null_dim, d) - orthonormal null space basis of task LoRA A
-            rank: rank of doc LoRA (r_K)
-        """
         super().__init__()
         null_dim, d = null_basis.shape
         self.null_dim = null_dim
@@ -286,21 +278,17 @@ def apply_null_space_reparameterization(model, task_lora_params, null_basis_dict
             print(f"[Hard Orth] Warning: no task LoRA A found for {norm_name}, skipping")
             continue
 
-        # Look up the pre-computed null space basis
         N = null_basis_dict[norm_name]
 
-        # Get current doc LoRA A info
         current_lora_a = module.lora_A[adapter_name]
         r_K = current_lora_a.weight.data.shape[0]
         device = current_lora_a.weight.data.device
 
-        # Create NullSpaceLoraA (kaiming init, no original weight projection)
         null_lora_a = NullSpaceLoraA(
             null_basis=N.to(device),
             rank=r_K,
         ).to(device)
 
-        # Replace the standard lora_A with our reparameterized version
         module.lora_A[adapter_name] = null_lora_a
         replaced_count += 1
 
@@ -320,16 +308,13 @@ def restore_standard_lora_a(model, adapter_name="default"):
 
         if isinstance(module.lora_A[adapter_name], NullSpaceLoraA):
             null_module = module.lora_A[adapter_name]
-            # Compute effective weight: A_K = hat_A @ N
-            effective_weight = null_module.weight.detach().clone()  # (r_K, d)
+            effective_weight = null_module.weight.detach().clone()
             r_K, d = effective_weight.shape
             device = effective_weight.device
 
-            # Create standard nn.Linear with the effective weight
             standard_linear = nn.Linear(d, r_K, bias=False).to(device)
             standard_linear.weight.data.copy_(effective_weight)
 
-            # Replace back
             module.lora_A[adapter_name] = standard_linear
             restored_count += 1
 
@@ -358,13 +343,11 @@ def verify_orthogonality(model, task_lora_params, adapter_name="default", tol=1e
         A_T = task_lora_params[norm_name]
         lora_a_module = module.lora_A[adapter_name]
 
-        # Get effective weight (handles both NullSpaceLoraA and nn.Linear)
         if isinstance(lora_a_module, NullSpaceLoraA):
             A_K = lora_a_module.weight.detach()
         else:
             A_K = lora_a_module.weight.data
 
-        # Check: A_K @ A_T^T should be zero
         product = A_K.float() @ A_T.float().T
         violation = product.abs().max().item()
         max_violation = max(max_violation, violation)
@@ -375,7 +358,6 @@ def verify_orthogonality(model, task_lora_params, adapter_name="default", tol=1e
     print(f"[Orth Check] Max orthogonality violation: {max_violation:.6e}")
     return max_violation
 
-# ======================== Training (modified from encode_doc.py) ========================
 
 def train(model, augments, tokenizer, args,
           init_adapter_path, save_path, task_lora_params, null_basis_dict):
@@ -383,8 +365,6 @@ def train(model, augments, tokenizer, args,
     train_data = TrainingData(prompt_ids, tokenizer, args)
     model = PeftModel.from_pretrained(model, init_adapter_path, is_trainable=True)
 
-    # Apply null space reparameterization for hard orthogonality
-    # Uses pre-computed null bases — no SVD needed here!
     device = next(model.parameters()).device
     task_lora_params_device = {k: v.to(device) for k, v in task_lora_params.items()}
     model = apply_null_space_reparameterization(model, task_lora_params_device, null_basis_dict)
@@ -439,20 +419,32 @@ def train(model, augments, tokenizer, args,
 
 def main(args):
     if args.dataset == "fever":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "fever_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
+        if os.path.exists(kilt_aug_file):
+            aug_file = kilt_aug_file
+        else:
+            aug_file = os.path.join(ROOT_DIR, "doc_aug", "fever_top.json")
     elif args.dataset == "zeroshot_re":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "zsre_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
+        if os.path.exists(kilt_aug_file):
+            aug_file = kilt_aug_file
+        else:
+            aug_file = os.path.join(ROOT_DIR, "doc_aug", "zsre_top.json")
     elif args.dataset == "wow":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
+        if os.path.exists(kilt_aug_file):
+            aug_file = kilt_aug_file
+        else:
+            aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow_top.json")
     elif args.dataset == "pubmedqa":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_pub10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "med_top10.json") 
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "pub.json") 
     else:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr10", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr_top10.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr.json")
     data_list = load_data(None, None, None, data_dir=data_dir)
 
     with open(aug_file, "r", encoding="utf-8") as f:
@@ -469,11 +461,10 @@ def main(args):
             ROOT_DIR,
             "offline_task",
             args.model_name,
-            args.task_type,
-            "LLM"
+            args.task_type
         )
 
-    task_base_path_weak = os.path.join(
+    task_base_path = os.path.join(
         ROOT_DIR,
         "task_base_LLM",
         args.model_name,
@@ -498,7 +489,7 @@ def main(args):
 
         base_model, tokenizer, _ = get_model(args.model_name)
         task_path_current = task_lora_path
-        task_base_save_path = os.path.join(task_base_path_weak)
+        task_base_save_path = os.path.join(task_base_path)
         model = load_task_lora_as_base(base_model, task_lora_path, task_base_save_path, tokenizer)
         model, tokenizer, _ = get_model(task_base_save_path)
 

@@ -12,13 +12,11 @@ from utils import *
 
 def main(args):
     if args.dataset in ["fever", "zeroshot_re", "triviaqa", "wow"]:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-    elif args.dataset == "test":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_test", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
     elif args.dataset == "pubmedqa":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_pub10", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
     else:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr10", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
     data_list = load_data(None, None, None, data_dir=data_dir)
     if args.with_cot:
         prompt_template.get_fewshot(args.dataset)
@@ -55,8 +53,7 @@ def main(args):
         ROOT_DIR,
         "offline_task",
         args.model_name,
-        args.task_type,
-        "LLM"
+        args.task_type
     )
     output_root_dir = os.path.join(
         ROOT_DIR, 
@@ -66,7 +63,7 @@ def main(args):
         args.dataset,
         args.inference_method
     )
-    if args.inference_method in ["D-PRAG", "D-PRAG-combine", "D-PRAG-tie", "D-PRAG-hard", "D-PRAG-hard-tie"]:
+    if args.inference_method in ["D-PRAG", "D-PRAG-combine", "D-PRAG-tie", "D-PRAG-tie-combine"]:
         output_root_dir = os.path.join(output_root_dir, f"lambda_orth={args.lambda_orth}")
 
     if args.inference_method in ["D-PRAG-tie", "D-PRAG-tie-combine", "D-PRAG-hard-tie", "D-PRAG-hard-tie-combine"]:
@@ -78,7 +75,7 @@ def main(args):
         f"doc_num={args.doc_num}"
     )
 
-    if args.inference_method in ["PRAG-task", "D-PRAG", "D-PRAG-combine", "D-PRAG-hard", "D-PRAG-tie", "D-PRAG-tie-combine", "D-PRAG-hard-tie", "D-PRAG-hard-combine", "D-PRAG-hard-tie-combine"]: # TODO: if choose inference method D-PRAG (LLM'(LLM + task LoRA) + merge(doc LoRA))
+    if args.inference_method in ["PRAG-task", "D-PRAG", "D-PRAG-combine", "D-PRAG-hard", "D-PRAG-tie", "D-PRAG-tie-combine", "D-PRAG-hard-tie", "D-PRAG-hard-combine", "D-PRAG-hard-tie-combine"]:
         model, tokenizer, generation_config = get_model(
             task_base_LLM_path,
             max_new_tokens = args.max_new_tokens,
@@ -255,19 +252,6 @@ def main(args):
                     psgs = passages[:args.doc_num] if isinstance(passages, list) else passages
                 ret.append(get_pred(model, psgs=psgs))
                 model.delete_adapter("merge")
-                model = model.unload()
-                torch.cuda.empty_cache()
-                gc.collect()
-            elif args.inference_method == "task_lora-only":
-                model = PeftModel.from_pretrained(
-                    model, 
-                    task_LoRA_path,
-                    adapter_name = "0", 
-                    is_trainable = False
-                )
-                model.set_adapter("0")
-                ret.append(get_pred(model, psgs=None))
-                model.delete_adapter("0")
                 model = model.unload()
                 torch.cuda.empty_cache()
                 gc.collect()

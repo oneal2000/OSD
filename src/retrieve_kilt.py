@@ -1,5 +1,3 @@
-# this script is to retrieve passages for various KILT datasets using BM25 retriever in kilt
-# TODO: add more KILT datasets
 import os
 import json
 import random
@@ -33,7 +31,6 @@ def load_fever(data_path):
                 }
                 new_dataset.append(val)
 
-    # new_dataset = new_dataset[1000:]
     return {"total": new_dataset}
 
 
@@ -72,7 +69,6 @@ def load_zeroshot_re(data_path):
             }
             new_dataset.append(val)
 
-    # new_dataset = new_dataset[1000:]
     return {"total": new_dataset}
 
 # Open domain QA
@@ -104,7 +100,6 @@ def load_triviaqa(data_path):
             }
             new_dataset.append(val)
     
-    # new_dataset = new_dataset[1000:]
     return {"total": new_dataset}
 
 # Dialogue
@@ -133,9 +128,8 @@ def load_wow(data_path):
 
 
 def main(args):
-    output_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
-    # output_dir = os.path.join(ROOT_DIR, "FT_data", args.dataset)
-    docs_file = os.path.join(ROOT_DIR, "all_docs_wow.json")
+    output_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+    docs_file = os.path.join(ROOT_DIR, "all_docs_kilt.json")
     os.makedirs(output_dir, exist_ok=True)
 
     print("### Loading dataset ###")
@@ -218,7 +212,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--data_path", type=str, default="/data-share/yeesuanAI08/zhanghanwen/D-PRAG/data_kilt")
+    parser.add_argument("--data_path", type=str)
     parser.add_argument("--sample", type=int, required=True)
     parser.add_argument("--topk", type=int, default=3) 
     args = parser.parse_args()

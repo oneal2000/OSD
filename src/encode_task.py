@@ -1,4 +1,3 @@
-# this script is for training task LoRA with 1500 samples from datasets of each task
 import os
 import gc
 import json
@@ -41,84 +40,42 @@ class TrainingData(Dataset):
         for data in origin_dataset:
             if args.task_type == "open_domain_qa":
                 question = _get_question(data)
-                if args.LoRA_type == "RAG":
-                    prompt_ids = prompt_template.get_prompt(
-                        tokenizer=tokenizer, 
-                        question=question,
-                        passages=data["passages"], 
-                        answer=None,
-                        with_cot=args.with_cot
-                    )
-                else:
-                    prompt_ids = prompt_template.get_prompt(
-                        tokenizer=tokenizer, 
-                        question=question,
-                        passages=None, 
-                        answer=None,
-                        with_cot=args.with_cot
-                    )
+                prompt_ids = prompt_template.get_prompt(
+                    tokenizer=tokenizer,
+                    question=question,
+                    passages=None,
+                    answer=None,
+                    with_cot=args.with_cot
+                )
             elif args.task_type == "fact_checking":
-                if args.LoRA_type == "RAG":
-                    prompt_ids = prompt_template.get_prompt_fc(
-                        tokenizer=tokenizer, 
-                        input=data["input"], 
-                        passages=data["passages"],
-                        output=None
-                    )
-                else: # LLM
-                    prompt_ids = prompt_template.get_prompt_fc(
-                        tokenizer=tokenizer, 
-                        input=data["input"], 
-                        passages=None,
-                        output=None
-                    )
+                prompt_ids = prompt_template.get_prompt_fc(
+                    tokenizer=tokenizer,
+                    input=data["input"],
+                    passages=None,
+                    output=None
+                )
             elif args.task_type == "dialogue":
-                if args.LoRA_type == "RAG":
-                    prompt_ids = prompt_template.get_prompt_dialogue(
-                        tokenizer=tokenizer, 
-                        input=data["input"], 
-                        passages=data["passages"],
-                        output=None
-                    )
-                else: # LLM
-                    prompt_ids = prompt_template.get_prompt_dialogue(
-                        tokenizer=tokenizer, 
-                        input=data["input"], 
-                        passages=None,
-                        output=None
-                    )
+                prompt_ids = prompt_template.get_prompt_dialogue(
+                    tokenizer=tokenizer,
+                    input=data["input"],
+                    passages=None,
+                    output=None
+                )
             elif args.task_type == "slot_filling":
-                if args.LoRA_type == "RAG":
-                    prompt_ids = prompt_template.get_prompt_sf(
-                        tokenizer=tokenizer, 
-                        input=data["input"], 
-                        template_question=data["template_question"],
-                        passages=data["passages"],
-                        output=None
-                    )
-                else: # LLM
-                    prompt_ids = prompt_template.get_prompt_sf(
-                        tokenizer=tokenizer, 
-                        input=data["input"], 
-                        template_question=data["template_question"],
-                        passages=None,
-                        output=None
-                    )
+                prompt_ids = prompt_template.get_prompt_sf(
+                    tokenizer=tokenizer,
+                    input=data["input"],
+                    template_question=data["template_question"],
+                    passages=None,
+                    output=None
+                )
             elif args.task_type == "med_verify":
                 question = data["question"]
-                if args.LoRA_type == "RAG":
-                    prompt_ids = prompt_template.get_prompt_pubmedqa(
-                        tokenizer=tokenizer,
-                        question=question,
-                        passages=data["passages"],
-                        answer=None
-                    )
-                else:  # LLM
-                    prompt_ids = prompt_template.get_prompt_pubmedqa_llm(
-                        tokenizer=tokenizer,
-                        question=question,
-                        answer=None
-                    )
+                prompt_ids = prompt_template.get_prompt_pubmedqa_llm(
+                    tokenizer=tokenizer,
+                    question=question,
+                    answer=None
+                )
 
             answer = data["answer"]
             answer_ids = tokenizer.encode(answer, add_special_tokens=False)
@@ -176,7 +133,10 @@ class TrainingDataCollator(DefaultDataCollator):
         }
 
 def main(args):
-    input_file = os.path.join(ROOT_DIR, "doc_aug", "pub_3.json")
+    if args.task_type == "med_verify":
+        input_file = os.path.join(ROOT_DIR, "doc_aug", "pub.json")
+    else:
+        input_file = os.path.join(ROOT_DIR, "doc_aug", "kit.json")
     with open(input_file, "r") as f:
         input_data = json.load(f)
 
@@ -185,7 +145,6 @@ def main(args):
         passage = entry["passage"]
         for task in entry["task"]:
             if task["type"] == args.task_type:
-                # The 'data' field can be a dict or a list of dicts
                 task_data_list = task["data"] if isinstance(task["data"], list) else [task["data"]]
                 
                 for item in task_data_list:
@@ -281,8 +240,7 @@ def main(args):
 
     # --- 5. Training Setup ---
     save_path = os.path.join(
-        ROOT_DIR, "offline_task", args.model_name, args.task_type, args.LoRA_type
-        # f"epoch={args.num_train_epochs}_lr={args.learning_rate}_dropout={args.dropout_rate}"
+        ROOT_DIR, "offline_task", args.model_name, args.task_type
     )
     os.makedirs(save_path, exist_ok=True)
 
@@ -322,7 +280,6 @@ def main(args):
 
     model.save_pretrained(save_path)
 
-    # Plot and save the loss curve
     plt.figure(figsize=(10, 5), dpi=300)
     plt.plot(train_losses, label="Train Loss")
     plt.plot(val_steps, val_losses, label="Validation Loss", marker='o')
@@ -342,10 +299,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--task_type", type=str, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "med_verify"], required=True)
-    parser.add_argument("--LoRA_type", type=str, default="LLM", choices=["RAG", "LLM"])
     parser.add_argument("--with_cot", action="store_true")
     
-    # Training arguments
     parser.add_argument("--per_device_train_batch_size", type=int, default=8)
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
@@ -353,7 +308,6 @@ if __name__ == "__main__":
     parser.add_argument("--block_size", type=int, default=300)
     parser.add_argument("--sample", type=int, default=-1)
     
-    # LoRA arguments
     parser.add_argument("--lora_rank", type=int, default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)
     
