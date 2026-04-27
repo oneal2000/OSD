@@ -1,17 +1,16 @@
-# this script is to augment documents with rewriting, QA, fact-checking, and slot-filling using LLMs
-# the format of the augmented data is as follows: rewrite + 3 qa + 3 fact-checking + 3 slot-filling + task data (1 fact-checking + 1 slot-filling + 1 open-domain QA)
-# almost same as https://github.com/oneal2000/PRAG
 import os
 import json
 import re
 import random
 import argparse
 from tqdm import tqdm
+from copy import deepcopy
 from utils import get_model, model_generate
 from root_dir_path import ROOT_DIR
 
-INPUT_FILE = os.path.join(ROOT_DIR, "all_docs_test.json")
-OUTPUT_FILE = os.path.join(ROOT_DIR, "doc_aug", "test.json")
+# INPUT_FILE = os.path.join(ROOT_DIR, "all_docs_test.json")
+# INPUT_FILE = args.input_file
+# OUTPUT_FILE = os.path.join(ROOT_DIR, "doc_aug", "test.json")
 
 
 random.seed(42)
@@ -79,7 +78,7 @@ pubmedqa_prompt_template = (
 )
 
 
-dialogue_prompt = "I will provide a passage of text from Wikipedia, and you need to generate three knowledge-grounded dialogues in the style of Wizard of Wikipedia dataset. \
+dialogue_prompt = "I will provide a passage of text from Wikipedia, and you need to generate four knowledge-grounded dialogues in the style of Wizard of Wikipedia dataset. \
 Each dialogue should be a natural, multi-turn conversation between a curious user and a knowledgeable assistant (wizard) who has access to the provided passage. \
 The assistant should provide informative, detailed responses based on the passage content, while maintaining a natural conversational flow. \
 The input should contain the conversation history (alternating user and assistant messages), and the output should be the assistant's response to the last user message. \
@@ -99,9 +98,9 @@ Important guidelines:\n\
 - Each dialogue should have varied number of turns (typically 1-6 turns)\n\
 - The user's questions should explore different aspects of the topic mentioned in the passage\n\
 - The assistant's responses should synthesize information from the passage in a natural way\n\
-- Generate at least three dialogues with different conversation flows\n\
+- Generate at least four dialogues with different conversation flows\n\
 \nYou only need to output this list in the above format.\n\
-This list should have at least three elements.\n\
+This list should have at least four elements.\n\
 Passage:\n\
 {passage}"
 
@@ -252,8 +251,8 @@ def get_dialogue(passage, model=None, tokenizer=None, generation_config=None):
         output = re.sub(r",\s*([\]}])", r"\1", output)
         try:
             dialogues = json.loads(output[output.find("["): output.rfind("]")+1])
-            if len(dialogues) >= 3:
-                dialogues = dialogues[:3]
+            if len(dialogues) >= 4:
+                dialogues = dialogues[:4]
                 for data in dialogues:
                     if "input" not in data or "output" not in data:
                         return False, dialogues
@@ -299,6 +298,8 @@ def main(args):
         # print(f"Processing doc {doc['global_id']}")
         doc["augment"] = []
         passage = doc["text"]
+        
+
         doc_rewrite = get_rewrite(passage, args.model_name, model, tokenizer, generation_config)
         # aug_qa = get_qa(passage, args.model_name, model, tokenizer, generation_config)
         # if fix_qa(aug_qa)[0] == False: # skip error passage
@@ -309,15 +310,25 @@ def main(args):
         # aug_sf = get_sf(passage, model, tokenizer, generation_config)
         # if aug_sf[0] == False: # skip error passage
         #     continue
+        aug_dialogue = get_dialogue(passage, model, tokenizer, generation_config)
+        if aug_dialogue[0] == False: # skip error passage
+            continue
+        # aug_pubmedqa = get_pubmedqa(passage, args.model_name, model, tokenizer, generation_config)
+        # if aug_pubmedqa[0] == False:
+        #     continue
         # qa_for_aug = aug_qa[:3]
         # fc_for_aug = aug_fc[1][:3]
         # sf_for_aug = aug_sf[1][:3]
-        # doc["augment"].append({
-        #         "rewrite": doc_rewrite,
-        #         "qa": qa_for_aug,
-        #         "fact_checking": fc_for_aug,
-        #         "slot_filling": sf_for_aug
-        #     })
+        dialogue_for_aug = aug_dialogue[1][:3]
+        # pubmedqa_for_aug = aug_pubmedqa[1][:3]
+        doc["augment"].append({
+                "rewrite": doc_rewrite,
+                # "qa": qa_for_aug,
+                # "fact_checking": fc_for_aug,
+                # "slot_filling": sf_for_aug,
+                "dialogue": dialogue_for_aug,
+                # "pubmedqa": pubmedqa_for_aug
+            })
         # doc["task"] = []
         # doc["task"].append({
         #     "type": "fact_checking",
@@ -337,28 +348,19 @@ def main(args):
         #     "type": "open_domain_qa",
         #     "data": open_domain_qa
         # })
-        aug_pubmedqa = get_pubmedqa(passage, args.model_name, model, tokenizer, generation_config)
-        if aug_pubmedqa[0] == False:
-            continue
-        doc["task"].append({
-            "type": "pubmedqa",
-            "data": aug_pubmedqa[1][3]
-        })
-        pubmedqa_for_aug = aug_pubmedqa[1][:3]
-        aug_dialogue = get_dialogue(passage, model, tokenizer, generation_config)
-        if aug_dialogue[0] == False: # skip error passage
-            continue
-        dialogue_for_aug = aug_dialogue[1][:3]
-        doc["augment"].append({
-                "rewrite": doc_rewrite,
-                "dialogue": dialogue_for_aug,
-                "pubmedqa": pubmedqa_for_aug
-            })
+        # doc["task"].append({
+        #     "type": "pubmedqa",
+        #     "data": aug_pubmedqa[1][3]
+        # })
+        # doc["task"].append({
+        #     "type": "dialogue",
+        #     "data": aug_dialogue[1][3]
+        # })
         val = {
             "global_id": doc["global_id"],
             "passage": passage,
             "augment": doc["augment"],
-            "task": doc["task"]
+            # "task": doc["task"]
         }
         ret.append(val)
         pbar.update(1)
@@ -373,6 +375,10 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, default="llama3-8b-instruct", help="model name")
+    parser.add_argument("--input_file", type=str)
+    parser.add_argument("--output_file", type=str)
     args = parser.parse_args()
     print(args)
+    INPUT_FILE = args.input_file
+    OUTPUT_FILE = args.output_file
     main(args)

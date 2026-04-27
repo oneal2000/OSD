@@ -1,7 +1,3 @@
-# this script is to train document-specific LoRA adapters with orthogonal regularization
-# first load the task LoRA adapter and merge it into the base model to get the task base model and save it
-# then train document LoRA adapters on augmented data with orthogonal regularization against the task LoRA adapters
-# the training process is based on the base model with the task base model
 import os
 import gc
 import sys
@@ -11,8 +7,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import json
 import argparse
 import torch
+import torch.nn as nn
 from tqdm import tqdm
-from peft import TaskType, get_peft_model, LoraConfig, PeftModel, PeftMixedModel, PeftMixedModel
+from peft import TaskType, get_peft_model, LoraConfig, PeftModel
+from peft.tuners.lora.layer import LoraLayer
 from torch.utils.data import Dataset
 from transformers import DefaultDataCollator
 from typing import Dict, List
@@ -28,6 +26,7 @@ seed = 42
 torch.manual_seed(seed)
 np.random.seed(seed)
 random.seed(seed)
+
 
 class TrainingData(Dataset):
     ignored_id = -100
@@ -78,6 +77,7 @@ class TrainingDataCollator(DefaultDataCollator):
             "labels": torch.tensor(labels).to(self.device),
             "attention_mask": torch.tensor(attention_mask).to(self.device),
         }
+
 
 def get_train_data(augments, tokenizer, args):
     prompt_ids = []
@@ -176,7 +176,6 @@ def get_train_data(augments, tokenizer, args):
 
     return prompt_ids
 
-# load the task LoRA adapter, merge it into the base model, and save the new model as the task base model
 def load_task_lora_as_base(model, task_lora_path, save_path, tokenizer=None):
     print(f"Loading task LoRA from {task_lora_path}")
     model = PeftModel.from_pretrained(model, task_lora_path)
@@ -188,20 +187,17 @@ def load_task_lora_as_base(model, task_lora_path, save_path, tokenizer=None):
     print(f"New task_base LLM saved at {save_path}")
     return model
 
-# helper to align module names from different model wrappers
 def _normalize_module_name(name: str) -> str:
     if "model.layers" in name:
         idx = name.index("model.layers")
         return name[idx:]
     return name
 
-
 def load_task_lora_weights(task_lora_path: str) -> Dict[str, torch.Tensor]:
     weight_path = os.path.join(task_lora_path, "adapter_model.safetensors")
     if not os.path.exists(weight_path):
         raise FileNotFoundError(f"Cannot find task LoRA weights at {weight_path}")
     state_dict = load_file(weight_path)
-    # print(state_dict)
     allowed_suffix = {"down_proj", "gate_proj", "up_proj"}
     task_params = {}
     for key, tensor in state_dict.items():
@@ -213,113 +209,232 @@ def load_task_lora_weights(task_lora_path: str) -> Dict[str, torch.Tensor]:
                 task_params[norm_name] = tensor.clone()
     return task_params
 
-# orthogonal regularization loss between document LoRA and task LoRA
-# this orthogonal loss is computed on the LoRA A matrices
-# TODO: test orthogonal loss computed on LoRA B matrices
-def orthogonal_loss(model, task_lora_params):
-    device = next(model.parameters()).device
-    loss = torch.tensor(0.0, device=device)
 
-    if not task_lora_params:
-        return loss
+def compute_null_space_basis(A_T: torch.Tensor, r_doc: int, tol: float = 1e-5) -> torch.Tensor:
+    U, S, Vh = torch.linalg.svd(A_T.float(), full_matrices=True)
+    effective_rank = (S > tol).sum().item()
 
-    doc_params = {}
-    for name, param in model.named_parameters():
-        if f".lora_A.default.weight" in name:
-            module_name = name.split(f".lora_A.default.weight")[0]
-            suffix = module_name.rsplit('.', 1)[-1]
-            if suffix in {"down_proj", "gate_proj", "up_proj"}:
-                # print(name)
-                norm_name = _normalize_module_name(module_name)
-                doc_params[norm_name] = param.to(device)
+    # Null space basis = the right singular vectors NOT in the row space of A_T
+    N = Vh[effective_rank:]  # (d - effective_rank, d)
+    null_dim = N.shape[0]
 
-    # for name, param in doc_params.items():
-    #     if any(s in name for s in ["down_proj", "gate_proj", "up_proj"]):
-    #         print(param)
-    #         print(f"[D] {name} sum={param.abs().sum().item():.6f}")
+    if null_dim < r_doc:
+        raise ValueError(
+            f"Null space dimension ({null_dim}) < doc LoRA rank ({r_doc}). "
+            f"Task LoRA effective rank is {effective_rank}, input dim is {A_T.shape[1]}. "
+            f"Cannot guarantee hard orthogonality with this configuration."
+        )
 
-    normalized_task = {k: v.to(device) for k, v in task_lora_params.items()}
-    # for name, param in normalized_task.items():
-    #     if any(s in name for s in ["down_proj", "gate_proj", "up_proj"]):
-    #         print(param)
-    #         print(f"[T] {name} sum={param.abs().sum().item():.6f}")
+    return N
+
+
+class NullSpaceLoraA(nn.Module):
+    def __init__(self, null_basis: torch.Tensor, rank: int):
+        """
+        Args:
+            null_basis: (null_dim, d) - orthonormal null space basis of task LoRA A
+            rank: rank of doc LoRA (r_K)
+        """
+        super().__init__()
+        null_dim, d = null_basis.shape
+        self.null_dim = null_dim
+
+        self.register_buffer('null_basis', null_basis)
+
+        self.hat_A = nn.Parameter(torch.empty(rank, null_dim))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.hat_A, a=5**0.5)
+
+    @property
+    def weight(self):
+        return self.hat_A @ self.null_basis
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        actual_A = self.hat_A @ self.null_basis  # (r_K, d)
+        return nn.functional.linear(x, actual_A)  # x @ actual_A^T → (..., r_K)
+
+
+def precompute_null_bases(task_lora_params: Dict[str, torch.Tensor],
+                          r_doc: int = 2) -> Dict[str, torch.Tensor]:
+    null_basis_dict = {}
+    print(f"[Hard Orth] Pre-computing null space bases for {len(task_lora_params)} modules...")
+    for name, A_T in task_lora_params.items():
+        null_basis_dict[name] = compute_null_space_basis(A_T, r_doc=r_doc)
+    print(f"[Hard Orth] Pre-computation done. {len(null_basis_dict)} null bases computed.")
+    return null_basis_dict
+
+
+def apply_null_space_reparameterization(model, task_lora_params, null_basis_dict, adapter_name="default"):
+    target_suffixes = {"down_proj", "gate_proj", "up_proj"}
+    replaced_count = 0
+
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        if not hasattr(module, 'lora_A') or adapter_name not in module.lora_A:
+            continue
+
+        suffix = name.rsplit('.', 1)[-1]
+        if suffix not in target_suffixes:
+            continue
+
+        norm_name = _normalize_module_name(name)
+        if norm_name not in task_lora_params:
+            print(f"[Hard Orth] Warning: no task LoRA A found for {norm_name}, skipping")
+            continue
+
+        # Look up the pre-computed null space basis
+        N = null_basis_dict[norm_name]
+
+        # Get current doc LoRA A info
+        current_lora_a = module.lora_A[adapter_name]
+        r_K = current_lora_a.weight.data.shape[0]
+        device = current_lora_a.weight.data.device
+
+        # Create NullSpaceLoraA (kaiming init, no original weight projection)
+        null_lora_a = NullSpaceLoraA(
+            null_basis=N.to(device),
+            rank=r_K,
+        ).to(device)
+
+        # Replace the standard lora_A with our reparameterized version
+        module.lora_A[adapter_name] = null_lora_a
+        replaced_count += 1
+
+    print(f"[Hard Orth] Replaced {replaced_count} LoRA A modules with NullSpaceLoraA")
     
-    common_modules = set(normalized_task.keys()) & set(doc_params.keys())
-    # print(common_modules)
+    return model
 
-    for module_name in common_modules:
-        task_param = normalized_task[module_name]
-        doc_param = doc_params[module_name]
-        doc_flat = doc_param.view(doc_param.size(0), -1)
-        task_flat = task_param.view(task_param.size(0), -1)
-        assert doc_flat.shape == task_flat.shape, f"Shape mismatch: {doc_flat.shape} vs {task_flat.shape}"
-        # loss += torch.norm(doc_flat.T @ task_flat, p='fro') ** 2 # loss is computed in this way if using A matrices to perform regularization
-        doc_result = doc_flat @ doc_flat.T
-        task_result = task_flat @ task_flat.T
-        current_loss = torch.trace(doc_result @ task_result)
-        loss = loss + current_loss
 
-    return loss
+def restore_standard_lora_a(model, adapter_name="default"):
+    restored_count = 0
 
-def train(model, augments,  tokenizer, args, 
-          init_adapter_path, save_path, task_lora_params):
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        if not hasattr(module, 'lora_A') or adapter_name not in module.lora_A:
+            continue
+
+        if isinstance(module.lora_A[adapter_name], NullSpaceLoraA):
+            null_module = module.lora_A[adapter_name]
+            # Compute effective weight: A_K = hat_A @ N
+            effective_weight = null_module.weight.detach().clone()  # (r_K, d)
+            r_K, d = effective_weight.shape
+            device = effective_weight.device
+
+            # Create standard nn.Linear with the effective weight
+            standard_linear = nn.Linear(d, r_K, bias=False).to(device)
+            standard_linear.weight.data.copy_(effective_weight)
+
+            # Replace back
+            module.lora_A[adapter_name] = standard_linear
+            restored_count += 1
+
+    print(f"[Hard Orth] Restored {restored_count} LoRA A modules to standard nn.Linear")
+    return model
+
+
+def verify_orthogonality(model, task_lora_params, adapter_name="default", tol=1e-4):
+    target_suffixes = {"down_proj", "gate_proj", "up_proj"}
+    max_violation = 0.0
+
+    for name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        if not hasattr(module, 'lora_A') or adapter_name not in module.lora_A:
+            continue
+
+        suffix = name.rsplit('.', 1)[-1]
+        if suffix not in target_suffixes:
+            continue
+
+        norm_name = _normalize_module_name(name)
+        if norm_name not in task_lora_params:
+            continue
+
+        A_T = task_lora_params[norm_name]
+        lora_a_module = module.lora_A[adapter_name]
+
+        # Get effective weight (handles both NullSpaceLoraA and nn.Linear)
+        if isinstance(lora_a_module, NullSpaceLoraA):
+            A_K = lora_a_module.weight.detach()
+        else:
+            A_K = lora_a_module.weight.data
+
+        # Check: A_K @ A_T^T should be zero
+        product = A_K.float() @ A_T.float().T
+        violation = product.abs().max().item()
+        max_violation = max(max_violation, violation)
+
+        if violation > tol:
+            print(f"[Orth Check] WARNING: {norm_name} violation={violation:.6e}")
+
+    print(f"[Orth Check] Max orthogonality violation: {max_violation:.6e}")
+    return max_violation
+
+# ======================== Training (modified from encode_doc.py) ========================
+
+def train(model, augments, tokenizer, args,
+          init_adapter_path, save_path, task_lora_params, null_basis_dict):
     prompt_ids = get_train_data(augments, tokenizer, args)
     train_data = TrainingData(prompt_ids, tokenizer, args)
     model = PeftModel.from_pretrained(model, init_adapter_path, is_trainable=True)
+
+    # Apply null space reparameterization for hard orthogonality
+    # Uses pre-computed null bases — no SVD needed here!
+    device = next(model.parameters()).device
+    task_lora_params_device = {k: v.to(device) for k, v in task_lora_params.items()}
+    model = apply_null_space_reparameterization(model, task_lora_params_device, null_basis_dict)
+
     model.is_parallelizable = True
     model.model_parallel = True
-    device = next(model.parameters()).device
+
     train_dataloader = torch.utils.data.DataLoader(
         train_data,
         batch_size=args.per_device_train_batch_size,
         collate_fn=TrainingDataCollator(tokenizer, device),
         shuffle=False,
     )
-    task_lora_params = {k: v.to(device) for k, v in task_lora_params.items()}
-    # for name, param in task_lora_params.items():
-    #     if any(s in name for s in ["down_proj", "gate_proj", "up_proj"]):
-    #         print(f"{name} sum={param.abs().sum().item():.6f}")
+
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     optimizer = torch.optim.AdamW(model_parameters, lr=args.learning_rate)
 
     first_out_loss = None
-    first_ortho_loss = None
-
     out_loss_hist = []
-    ortho_loss_hist = []
 
     for epoch in range(args.num_train_epochs):
         loop = tqdm(train_dataloader, desc=f"Epoch {epoch+1}")
         for step, batch in enumerate(loop):
             optimizer.zero_grad()
             outputs = model(**batch)
-            
-            out_loss = outputs.loss
-            ortho = orthogonal_loss(model, task_lora_params)
-            loss = out_loss + args.lambda_orth * ortho
-            # loss = out_loss # without orthogonal regularization
 
-            if first_out_loss is None and first_ortho_loss is None:
-                first_out_loss = out_loss.item()
-                first_ortho_loss = ortho.item()
+            loss = outputs.loss
 
-            out_loss_hist.append(out_loss.item())
-            ortho_loss_hist.append(ortho.item())
+            if first_out_loss is None:
+                first_out_loss = loss.item()
+
+            out_loss_hist.append(loss.item())
 
             loss.backward()
             optimizer.step()
 
             loop.set_postfix({
-                "out_loss": f"{out_loss.item():.4f}",
-                "ortho_loss": f"{ortho.item():.4f}",
-                "total_loss": f"{loss.item():.4f}"
+                "loss": f"{loss.item():.4f}",
             })
+
+    model = restore_standard_lora_a(model)
+
+    # verify_orthogonality(model, task_lora_params_device)
+
     os.makedirs(save_path, exist_ok=True)
     model.save_pretrained(save_path)
     model = model.unload()
     torch.cuda.empty_cache()
     gc.collect()
-    return model,first_out_loss,first_ortho_loss,out_loss_hist,ortho_loss_hist
+    return model, first_out_loss, out_loss_hist
 
 
 def main(args):
@@ -366,6 +481,7 @@ def main(args):
     )
 
     task_lora_cache = {}
+    null_basis_cache = {}
 
     for filename, fulldata in data_list:
         filename = filename.split('.')[0] 
@@ -374,7 +490,7 @@ def main(args):
             ROOT_DIR, 
             "offline_doc", 
             args.model_name, 
-            f"lambda={args.lambda_orth}",
+            "hard_orth",
             args.dataset,
             filename,
             f"epoch={args.num_train_epochs}_lr={args.learning_rate}",
@@ -391,7 +507,10 @@ def main(args):
         if cache_key not in task_lora_cache:
             task_lora_cache[cache_key] = load_task_lora_weights(cache_key)
         task_lora_params = task_lora_cache[cache_key]
-        # print(task_lora_params)
+
+        if cache_key not in null_basis_cache:
+            null_basis_cache[cache_key] = precompute_null_bases(task_lora_params, r_doc=args.lora_rank)
+        null_basis_dict = null_basis_cache[cache_key]
 
         init_path = os.path.join(
             ROOT_DIR, 
@@ -428,7 +547,6 @@ def main(args):
         fulldata = fulldata if args.sample == -1 else fulldata[:args.sample]
 
         first_out_losses = []
-        first_ortho_losses = []
         all_loss = []
 
         for did, data in tqdm(enumerate(fulldata), total=len(fulldata)):
@@ -445,7 +563,6 @@ def main(args):
             for passage in passages:
                 gid = passage["global_id"]
                 if gid in aug_map:
-                    # print(aug_map[gid])
                     _to_add = []
                     field_name = task_field_map[args.task_type]
                     _to_add.append({
@@ -458,7 +575,6 @@ def main(args):
 
             data_loss_records = {}
 
-            # print(data)
             for pid in range(len(data["augment"])):
                 passage_id = pid
                 save_path = os.path.join(output_dir, f"data_{did}", f"passage_{passage_id}")
@@ -466,32 +582,26 @@ def main(args):
                 if os.path.exists(os.path.join(check_path, "adapter_model.safetensors")):
                     continue
                 aug_list = data["augment"][pid]
-                # print(data["augment"][pid])
-                model,first_out,first_ortho,out_hist,ortho_hist = train(model, aug_list, tokenizer, args, init_path, save_path, task_lora_params)
-                if first_out is not None and first_ortho is not None:
+                model, first_out, out_hist = train(model, aug_list, tokenizer, args, init_path, save_path, task_lora_params, null_basis_dict)
+                if first_out is not None:
                     first_out_losses.append(first_out)
-                    first_ortho_losses.append(first_ortho)
 
                 data_loss_records[pid] = {
                     "out_loss": out_hist,
-                    "ortho_loss": ortho_hist,
                 }
 
             if len(data_loss_records) > 0:
                 for pid in sorted(data_loss_records.keys()):
                         out_hist = data_loss_records[pid]["out_loss"]
-                        ortho_hist = data_loss_records[pid]["ortho_loss"]
                         out_str = ", ".join(f"{v:.6f}" for v in out_hist)
-                        ortho_str = ", ".join(f"{v:.6f}" for v in ortho_hist)
-                        all_loss.append(f"data{did}:passage{pid} outloss：{out_str} ortholoss：{ortho_str}")
+                        all_loss.append(f"data{did}:passage{pid} loss：{out_str}")
                 
-        if len(first_ortho_losses) > 0:
+        if len(first_out_losses) > 0:
             avg_out = sum(first_out_losses) / len(first_out_losses)
-            avg_ortho = sum(first_ortho_losses) / len(first_ortho_losses)
             loss_file = os.path.join(output_dir, "loss_compare.txt")
             with open(loss_file, "w", encoding="utf-8") as f:
                 f.write(f"avg_first_out_loss={avg_out:.6f}\n")
-                f.write(f"avg_first_ortho_loss={avg_ortho:.6f}\n")
+                f.write(f"method=hard_orthogonality (null-space reparameterization)\n")
         
         if len(all_loss) >0:
             all_detail_path = os.path.join(output_dir, "loss_detail.txt")
@@ -511,9 +621,8 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--lora_rank", type=int, default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)
-    parser.add_argument("--lambda_orth", type=float, default=0.1) # TODO: lambda should be changed if using B matrices for orthogonal regularization
-    parser.add_argument("--task_LoRA_type", type=str, choices=["strong", "weak"], default="weak")
     parser.add_argument("--block_size", type=int, default=500)
     args = parser.parse_args()
     print(args)
     main(args)
+

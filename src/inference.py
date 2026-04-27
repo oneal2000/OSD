@@ -1,11 +1,3 @@
-# this script includes inference methods for different settings: LLM direct, RAG, PRAG, task_lora-only, D-PRAG
-# LLM_direct: directly use the base LLM for inference
-# RAG: use baseline RAG
-# PRAG: use baseline PRAG
-# task_lora-only: finetune LoRA with input-output for specific task, this method is the fundation for our method, it should perform better than LLM_direct
-# D-PRAG: this is our method: load both task LoRA weak(LoRA trained with input-output for specific task) and document LoRA, merge them for inference
-# test: it's something we used for debugging
-# Goal: perform better than baseline PRAG and RAG with our D-PRAG method
 import os
 import gc
 import json
@@ -20,13 +12,13 @@ from utils import *
 
 def main(args):
     if args.dataset in ["fever", "zeroshot_re", "triviaqa", "wow"]:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
     elif args.dataset == "test":
         data_dir = os.path.join(ROOT_DIR, "data_ret_test", args.dataset)
     elif args.dataset == "pubmedqa":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub10", args.dataset)
     else:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr10", args.dataset)
     data_list = load_data(None, None, None, data_dir=data_dir)
     if args.with_cot:
         prompt_template.get_fewshot(args.dataset)
@@ -35,6 +27,14 @@ def main(args):
         ROOT_DIR,
         "offline_doc",
         args.model_name,
+        f"lambda={args.lambda_orth}",
+        args.dataset
+    )
+    doc_LoRA_path_hard = os.path.join(
+        ROOT_DIR,
+        "offline_doc",
+        args.model_name,
+        "hard_orth",
         args.dataset
     )
     task_base_LLM_path = os.path.join(
@@ -66,8 +66,19 @@ def main(args):
         args.dataset,
         args.inference_method
     )
+    if args.inference_method in ["D-PRAG", "D-PRAG-combine", "D-PRAG-tie", "D-PRAG-hard", "D-PRAG-hard-tie"]:
+        output_root_dir = os.path.join(output_root_dir, f"lambda_orth={args.lambda_orth}")
 
-    if args.inference_method == "D-PRAG" or args.inference_method == "D-PRAG-combine": # TODO: if choose inference method D-PRAG (LLM'(LLM + task LoRA) + merge(doc LoRA))
+    if args.inference_method in ["D-PRAG-tie", "D-PRAG-tie-combine", "D-PRAG-hard-tie", "D-PRAG-hard-tie-combine"]:
+        output_root_dir = os.path.join(output_root_dir, f"ties_topk={args.ties_topk}")
+
+
+    output_root_dir = os.path.join(
+        output_root_dir,
+        f"doc_num={args.doc_num}"
+    )
+
+    if args.inference_method in ["PRAG-task", "D-PRAG", "D-PRAG-combine", "D-PRAG-hard", "D-PRAG-tie", "D-PRAG-tie-combine", "D-PRAG-hard-tie", "D-PRAG-hard-combine", "D-PRAG-hard-tie-combine"]: # TODO: if choose inference method D-PRAG (LLM'(LLM + task LoRA) + merge(doc LoRA))
         model, tokenizer, generation_config = get_model(
             task_base_LLM_path,
             max_new_tokens = args.max_new_tokens,
@@ -77,10 +88,6 @@ def main(args):
             args.model_name,
             max_new_tokens = args.max_new_tokens,
         )
-    # model, tokenizer, generation_config = get_model( # TODO: if choose inference method D-PRAG (LLM + merge(task LoRA + doc LoRA))
-    #     args.model_name,
-    #     max_new_tokens = args.max_new_tokens,
-    # )
     
     for filename, fulldata in data_list:
         filename = filename.split(".")[0]
@@ -130,7 +137,7 @@ def main(args):
                     else:
                         text = predict_dialogue(model, tokenizer, generation_config, 
                                         question, passages=psgs)
-                elif args.task_type == "pubmedqa":
+                elif args.task_type == "med_verify":
                     if args.inference_method == "LLM_direct":
                         text = predict_pubmedqa_llm(
                             model, tokenizer, generation_config,
@@ -141,6 +148,7 @@ def main(args):
                             model, tokenizer, generation_config,
                             question, passages=psgs
                         )
+                        # print(text)
                 else:   # open_domain_qa
                     if args.inference_method in ["LLM_direct"]:
                         text = predict_qa_llm(model, tokenizer, generation_config, 
@@ -156,7 +164,7 @@ def main(args):
                 }
                 if args.task_type == "dialogue":
                     pred.update(evaluate_dialogue(text, answer))
-                elif args.task_type == "pubmedqa":
+                elif args.task_type == "med_verify":
                     pred.update(evaluate(text, answer, with_cot=False))
                 else:
                     pred.update(evaluate(text, answer, args.with_cot))
@@ -165,10 +173,39 @@ def main(args):
             if args.inference_method == "LLM_direct":
                 ret.append(get_pred(model, psgs=None))
             elif args.inference_method == "RAG":
-                ret.append(get_pred(model, psgs=passages))
+                psgs = None
+                if passages:
+                    psgs = passages[:args.doc_num] if isinstance(passages, list) else passages
+                ret.append(get_pred(model, psgs=psgs))
             elif args.inference_method == "PRAG":
                 adapter_names = []
-                for pid in range(len(passages)):
+                for pid in range(NUM_TO_INSERT):
+                    adapter_path = os.path.join(PRAG_LoRA_path, filename, f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
+                model.add_weighted_adapter(
+                    adapters = adapter_names,
+                    weights=[1 / len(adapter_names)] * len(adapter_names),
+                    adapter_name = "merge",
+                    combination_type = "cat",
+                )
+                model.set_adapter("merge")
+                ret.append(get_pred(model, psgs=None))
+                model.delete_adapter("merge")
+                model = model.unload()
+                torch.cuda.empty_cache()
+                gc.collect()
+            elif args.inference_method == "PRAG-task":
+                adapter_names = []
+                for pid in range(NUM_TO_INSERT):
                     adapter_path = os.path.join(PRAG_LoRA_path, filename, f"data_{test_id}", f"passage_{pid}")
                     if pid == 0:
                         model = PeftModel.from_pretrained(
@@ -194,7 +231,7 @@ def main(args):
                 gc.collect()
             elif args.inference_method == "PRAG-combine":
                 adapter_names = []
-                for pid in range(len(passages)):
+                for pid in range(NUM_TO_INSERT):
                     adapter_path = os.path.join(PRAG_LoRA_path, filename, f"data_{test_id}", f"passage_{pid}")
                     if pid == 0:
                         model = PeftModel.from_pretrained(
@@ -213,7 +250,10 @@ def main(args):
                     combination_type = "cat",
                 )
                 model.set_adapter("merge")
-                ret.append(get_pred(model, psgs=passages))
+                psgs = None
+                if passages:
+                    psgs = passages[:args.doc_num] if isinstance(passages, list) else passages
+                ret.append(get_pred(model, psgs=psgs))
                 model.delete_adapter("merge")
                 model = model.unload()
                 torch.cuda.empty_cache()
@@ -231,45 +271,9 @@ def main(args):
                 model = model.unload()
                 torch.cuda.empty_cache()
                 gc.collect()
-            # elif args.inference_method == "D-PRAG":
-            #     adapter_names = []
-            #     # Load task LoRA
-            #     model = PeftModel.from_pretrained(
-            #         model, 
-            #         task_LoRA_path,
-            #         adapter_name = "0", 
-            #         is_trainable = False
-            #     )
-            #     adapter_names.append("0")
-            #     # Load document LoRAs
-            #     for pid in range(len(passages)):
-            #         adapter_path = os.path.join(doc_LoRA_path, filename, "epoch=2_lr=0.0003", f"data_{test_id}", f"passage_{pid}") # TODO: change epoch and lr if needed
-            #         model.load_adapter(adapter_path, adapter_name = str(pid+1))
-            #         adapter_names.append(str(pid+1))
-
-            #     task_weight = args.task_lora_weight
-            #     doc_weight = (1 - task_weight) / (len(adapter_names) - 1)
-            #     weights_list = [task_weight] + [doc_weight] * (len(adapter_names) - 1)
-                
-            #     model.add_weighted_adapter(
-            #         adapters = adapter_names,
-            #         # weights=[1 / len(adapter_names)] * len(adapter_names), # TODO: try other weighting methods if needed
-            #         weights = weights_list,
-            #         adapter_name = "merge",
-            #         combination_type = "cat",
-            #     )
-            #     model.set_adapter("merge")
-            #     ret.append(get_pred(model, psgs=None))
-            #     model.delete_adapter("merge")
-            #     for pid in range(len(passages)):
-            #         model.delete_adapter(str(pid+1))
-            #     model.delete_adapter("0")
-            #     model = model.unload()
-            #     torch.cuda.empty_cache()
-            #     gc.collect()
             elif args.inference_method == "D-PRAG":
                 adapter_names = []
-                for pid in range(len(passages)):
+                for pid in range(NUM_TO_INSERT):
                     adapter_path = os.path.join(doc_LoRA_path, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
                     if pid == 0:
                         model = PeftModel.from_pretrained(
@@ -291,14 +295,173 @@ def main(args):
                 model.set_adapter("merge")
                 ret.append(get_pred(model, psgs=None))
                 model.delete_adapter("merge")
-                for pid in range(len(passages)):
+                for pid in range(NUM_TO_INSERT):
+                    model.delete_adapter(str(pid))
+                model = model.unload()
+                torch.cuda.empty_cache()
+                gc.collect()
+            elif args.inference_method == "D-PRAG-hard":
+                adapter_names = []
+                for pid in range(NUM_TO_INSERT):
+                    adapter_path = os.path.join(doc_LoRA_path_hard, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
+
+                model.add_weighted_adapter(
+                    adapters = adapter_names,
+                    weights=[1 / len(adapter_names)] * len(adapter_names),
+                    adapter_name = "merge",
+                    combination_type = "cat",
+                )
+                model.set_adapter("merge")
+                ret.append(get_pred(model, psgs=None))
+                model.delete_adapter("merge")
+                for pid in range(NUM_TO_INSERT):
+                    model.delete_adapter(str(pid))
+                model = model.unload()
+                torch.cuda.empty_cache()
+                gc.collect()
+            elif args.inference_method == "D-PRAG-tie":
+                adapter_names = []
+                for pid in range(NUM_TO_INSERT):
+                    adapter_path = os.path.join(doc_LoRA_path, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
+
+                ties_merge_lora_adapters(model, adapter_names, topk_percent=args.ties_topk)
+                model.set_adapter(adapter_names[0])
+                ret.append(get_pred(model, psgs=None))
+                for pid in range(NUM_TO_INSERT):
+                    model.delete_adapter(str(pid))
+                model = model.unload()
+                torch.cuda.empty_cache()
+                gc.collect()
+            elif args.inference_method == "D-PRAG-hard-combine":
+                adapter_names = []
+                for pid in range(NUM_TO_INSERT):
+                    adapter_path = os.path.join(doc_LoRA_path_hard, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
+
+                model.add_weighted_adapter(
+                    adapters = adapter_names,
+                    weights=[1 / len(adapter_names)] * len(adapter_names),
+                    adapter_name = "merge",
+                    combination_type = "cat",
+                )
+                model.set_adapter("merge")
+                psgs = None
+                if passages:
+                    psgs = passages[:args.doc_num] if isinstance(passages, list) else passages
+                ret.append(get_pred(model, psgs=psgs))
+                model.delete_adapter("merge")
+                for pid in range(NUM_TO_INSERT):
+                    model.delete_adapter(str(pid))
+                model = model.unload()
+                torch.cuda.empty_cache()
+                gc.collect()
+            elif args.inference_method == "D-PRAG-hard-tie":
+                adapter_names = []
+                for pid in range(NUM_TO_INSERT):
+                    adapter_path = os.path.join(doc_LoRA_path_hard, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
+
+                ties_merge_lora_adapters(model, adapter_names, topk_percent=args.ties_topk)
+                model.set_adapter(adapter_names[0])
+                ret.append(get_pred(model, psgs=None))
+                for pid in range(NUM_TO_INSERT):
+                    model.delete_adapter(str(pid))
+                model = model.unload()
+                torch.cuda.empty_cache()
+                gc.collect()
+            elif args.inference_method == "D-PRAG-hard-tie-combine":
+                adapter_names = []
+                for pid in range(NUM_TO_INSERT):
+                    adapter_path = os.path.join(doc_LoRA_path_hard, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
+
+                ties_merge_lora_adapters(model, adapter_names, topk_percent=args.ties_topk)
+                model.set_adapter(adapter_names[0])
+                psgs = None
+                if passages:
+                    psgs = passages[:args.doc_num] if isinstance(passages, list) else passages
+                ret.append(get_pred(model, psgs=psgs))
+                for pid in range(NUM_TO_INSERT):
+                    model.delete_adapter(str(pid))
+                model = model.unload()
+                torch.cuda.empty_cache()
+                gc.collect()
+            elif args.inference_method == "D-PRAG-tie-combine":
+                adapter_names = []
+                for pid in range(NUM_TO_INSERT):
+                    adapter_path = os.path.join(doc_LoRA_path, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
+                    if pid == 0:
+                        model = PeftModel.from_pretrained(
+                            model, 
+                            adapter_path,
+                            adapter_name = "0", 
+                            is_trainable = False
+                        )
+                    else:
+                        model.load_adapter(adapter_path, adapter_name = str(pid)) 
+                    adapter_names.append(str(pid))
+
+                ties_merge_lora_adapters(model, adapter_names, topk_percent=args.ties_topk)
+                model.set_adapter(adapter_names[0])
+                psgs = None
+                if passages:
+                    psgs = passages[:args.doc_num] if isinstance(passages, list) else passages
+                ret.append(get_pred(model, psgs=psgs))
+                for pid in range(NUM_TO_INSERT):
                     model.delete_adapter(str(pid))
                 model = model.unload()
                 torch.cuda.empty_cache()
                 gc.collect()
             elif args.inference_method == "D-PRAG-combine":
                 adapter_names = []
-                for pid in range(len(passages)):
+                for pid in range(args.doc_num):
                     adapter_path = os.path.join(doc_LoRA_path, filename, f"epoch={args.num_train_epochs}_lr={args.learning_rate}", f"data_{test_id}", f"passage_{pid}")
                     if pid == 0:
                         model = PeftModel.from_pretrained(
@@ -318,9 +481,12 @@ def main(args):
                     combination_type = "cat",
                 )
                 model.set_adapter("merge")
-                ret.append(get_pred(model, psgs=passages))
+                psgs = None
+                if passages:
+                    psgs = passages[:args.doc_num] if isinstance(passages, list) else passages
+                ret.append(get_pred(model, psgs=psgs))
                 model.delete_adapter("merge")
-                for pid in range(len(passages)):
+                for pid in range(NUM_TO_INSERT):
                     model.delete_adapter(str(pid))
                 model = model.unload()
                 torch.cuda.empty_cache()
@@ -344,7 +510,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--task_type", type=str, required=True, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "pubmedqa"])
+    parser.add_argument("--task_type", type=str, required=True, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "med_verify"])
     parser.add_argument("--max_new_tokens", type=int, required=True)
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--with_cot", action="store_true")
@@ -354,11 +520,16 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--dropout_rate", type=float, default=0.2)
     parser.add_argument("--task_lora_weight", type=float, default=0.5)
-    parser.add_argument("--inference_method", type=str, default="LLM_direct", choices=["LLM_direct", "RAG", "PRAG", "PRAG-combine", "task_lora-only", "D-PRAG","D-PRAG-combine"])
+    parser.add_argument("--inference_method", type=str, default="LLM_direct", choices=["LLM_direct", "RAG", "PRAG", "PRAG-task", "PRAG-combine", "task_lora-only", "D-PRAG","D-PRAG-combine","D-PRAG-tie","D-PRAG-tie-combine", "D-PRAG-hard", "D-PRAG-hard-tie", "D-PRAG-hard-combine", "D-PRAG-hard-tie-combine"])
+    parser.add_argument("--lambda_orth", type=float, default=0.1) 
+    parser.add_argument("--doc_num", type=int , default=3)
+    parser.add_argument("--svd_eps", type=float, default=1e-6)
+    parser.add_argument("--ties_topk", type=float, default=60.0)
     # LoRA
     parser.add_argument("--lora_rank", type=int ,default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)
     args = parser.parse_args()
     assert args.lora_rank and args.lora_alpha, "No Config for LoRA"
+    NUM_TO_INSERT = args.doc_num
     print(args)
     main(args)

@@ -133,7 +133,7 @@ def load_wow(data_path):
 
 
 def main(args):
-    output_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+    output_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
     # output_dir = os.path.join(ROOT_DIR, "FT_data", args.dataset)
     docs_file = os.path.join(ROOT_DIR, "all_docs_wow.json")
     os.makedirs(output_dir, exist_ok=True)

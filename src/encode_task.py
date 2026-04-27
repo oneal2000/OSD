@@ -104,7 +104,7 @@ class TrainingData(Dataset):
                         passages=None,
                         output=None
                     )
-            elif args.task_type == "pubmedqa":
+            elif args.task_type == "med_verify":
                 question = data["question"]
                 if args.LoRA_type == "RAG":
                     prompt_ids = prompt_template.get_prompt_pubmedqa(
@@ -176,7 +176,7 @@ class TrainingDataCollator(DefaultDataCollator):
         }
 
 def main(args):
-    input_file = os.path.join(ROOT_DIR, "doc_aug", "sampled_wow.json")
+    input_file = os.path.join(ROOT_DIR, "doc_aug", "pub_3.json")
     with open(input_file, "r") as f:
         input_data = json.load(f)
 
@@ -189,7 +189,7 @@ def main(args):
                 task_data_list = task["data"] if isinstance(task["data"], list) else [task["data"]]
                 
                 for item in task_data_list:
-                    if args.task_type == "pubmedqa":
+                    if args.task_type == "med_verify":
                         sample = {
                             "passages": [passage],
                             "question": item["question"],
@@ -222,6 +222,13 @@ def main(args):
         training_samples = supports[:min_count] + refutes[:min_count]
         random.shuffle(training_samples)
         print(f"Balanced fact_checking samples: SUPPORTS={min_count}, REFUTES={min_count}")
+
+    if args.task_type == "med_verify":
+        yess = [s for s in training_samples if s["answer"].strip()== "yes"]
+        nos = [s for s in training_samples if s["answer"].strip() == "no"]
+        min_count = min(len(yess), len(nos))
+        training_samples = yess[:min_count] + nos[:min_count]
+        print(f"Balanced med_verify samples: YES={min_count}, NO={min_count}")
     
     if args.sample > 0:
         random.shuffle(training_samples)
@@ -334,7 +341,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--task_type", type=str, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "pubmedqa"], required=True)
+    parser.add_argument("--task_type", type=str, choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "med_verify"], required=True)
     parser.add_argument("--LoRA_type", type=str, default="LLM", choices=["RAG", "LLM"])
     parser.add_argument("--with_cot", action="store_true")
     

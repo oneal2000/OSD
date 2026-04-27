@@ -163,8 +163,8 @@ def load_default_format_data(data_path):
     
 
 def main(args):
-    output_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
-    docs_file = os.path.join(ROOT_DIR, "all_docs_dpr.json")
+    output_dir = os.path.join(ROOT_DIR, "data_ret_dpr10", args.dataset)
+    docs_file = os.path.join(ROOT_DIR, "all_docs_2wqa.json")
     # output_dir = os.path.join(ROOT_DIR, "FT_data", args.dataset)
     os.makedirs(output_dir, exist_ok=True)
 

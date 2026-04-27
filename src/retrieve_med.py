@@ -44,8 +44,8 @@ def load_pubmedqa(data_path):
 
 
 def main(args):
-    output_dir = os.path.join(ROOT_DIR, "data_ret_pub", "pubmedqa")
-    docs_file = os.path.join(ROOT_DIR, "all_docs_med.json")
+    output_dir = os.path.join(ROOT_DIR, "data_ret_pub10", "pubmedqa")
+    docs_file = os.path.join(ROOT_DIR, "all_docs_med10.json")
     os.makedirs(output_dir, exist_ok=True)
 
     print("### Loading MedQA ###")

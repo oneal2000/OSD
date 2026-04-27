@@ -4,6 +4,7 @@ import json
 import torch
 import string
 import numpy as np
+from peft.tuners.lora.layer import LoraLayer
 from collections import Counter
 from typing import List, Union
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -124,13 +125,19 @@ def load_data(data_name, data_type, model_name, data_dir=None):
 
 def get_model_path(model_name):
     if model_name == "llama3.1-8b-instruct": 
-        return "meta-llama/Meta-Llama-3.1-8B-Instruct"
+        # return "meta-llama/Meta-Llama-3.1-8B-Instruct"
+        return "/data-share/yeesuanAI08/LLM/Meta-Llama-3.1-8B-Instruct"
     elif model_name == "llama3-8b-instruct": 
-        return "meta-llama/Llama-3-8B-Instruct"
+        # return "meta-llama/Llama-3-8B-Instruct"
+        return "/data-share/yeesuanAI08/LLM/Meta-Llama-3-8B-Instruct"
+    elif model_name == "qwen2.5-1.5b-instruct":
+        return "Qwen/Qwen2.5-1.5B-Instruct"
     elif model_name == "llama3.2-3b-instruct":
-        return "meta-llama/Llama-3.2-3B-Instruct"
+        # return "meta-llama/Llama-3.2-3B-Instruct"
+        return "/data-share/yeesuanAI08/zhanghanwen/LLM/llama3.2-3b-instruct"
     elif model_name == "llama3.2-1b-instruct":
-        return "meta-llama/Llama-3.2-1B-Instruct"
+        # return "meta-llama/Llama-3.2-1B-Instruct"
+        return "/data-share/LLM/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6"
     else:
         return model_name
 
@@ -429,6 +436,91 @@ def predict_dialogue(model, tokenizer, generation_config, input, passages):
     output = output.sequences[0][input_len:]
     text = tokenizer.decode(output, skip_special_tokens=True)
     return text
+
+
+def ties_merge_tensor(task_vectors, topk_percent):
+    stacked = torch.stack(task_vectors, dim=0)
+    N = stacked.shape[0]
+    original_shape = stacked.shape[1:]
+    flat = stacked.reshape(N, -1).clone()
+    D = flat.shape[1]
+
+    k = max(1, int(D * topk_percent / 100.0))
+    for i in range(N):
+        abs_vals = flat[i].abs()
+        if k < D:
+            topk_threshold = abs_vals.topk(k).values[-1]
+            mask = abs_vals >= topk_threshold
+            flat[i] = flat[i] * mask.float()
+
+    positive_mass = flat.clamp(min=0).sum(dim=0) 
+    negative_mass = flat.clamp(max=0).abs().sum(dim=0)
+    elected_sign = torch.where(positive_mass >= negative_mass,
+                               torch.ones(D, device=flat.device),
+                               -torch.ones(D, device=flat.device))
+
+    sign_mask = (torch.sign(flat) == elected_sign.unsqueeze(0)) & (flat != 0)
+    aligned_sum = (flat * sign_mask.float()).sum(dim=0)
+    count = sign_mask.float().sum(dim=0).clamp(min=1)
+    merged = aligned_sum / count
+
+    return merged.reshape(original_shape)
+
+
+def ties_merge_lora_adapters(model, adapter_names, topk_percent):
+    for _name, module in model.named_modules():
+        if not isinstance(module, LoraLayer):
+            continue
+        if not hasattr(module, 'lora_A') or not hasattr(module, 'lora_B'):
+            continue
+        if not all(name in module.lora_A for name in adapter_names):
+            continue
+
+
+        adapter_vectors = [module.lora_B[name].weight.data.clone().reshape(-1)
+                           for name in adapter_names]
+        stacked = torch.stack(adapter_vectors, dim=0)  # [N, D]
+        N, D = stacked.shape
+        flat = stacked.clone()
+
+        k = max(1, int(D * topk_percent / 100.0))
+        for i in range(N):
+            abs_vals = flat[i].abs()
+            if k < D:
+                topk_threshold = abs_vals.topk(k).values[-1]
+                mask = abs_vals >= topk_threshold
+                flat[i] = flat[i] * mask.float()
+
+        positive_mass = flat.clamp(min=0).sum(dim=0)
+        negative_mass = flat.clamp(max=0).abs().sum(dim=0)
+        elected_sign = torch.where(
+            positive_mass >= negative_mass,
+            torch.ones(D, device=flat.device),
+            -torch.ones(D, device=flat.device)
+        )
+
+        for i in range(N):
+            align_mask = (torch.sign(flat[i]) == elected_sign) & (flat[i] != 0)
+            flat[i] = flat[i] * align_mask.float()
+
+        for i in range(N):
+            orig_norm = stacked[i].norm()
+            filtered_norm = flat[i].norm()
+            if filtered_norm > 0:
+                flat[i] = flat[i] * (orig_norm / filtered_norm)
+
+        sign_mask = (torch.sign(flat) == elected_sign.unsqueeze(0)) & (flat != 0)
+        aligned_sum = (flat * sign_mask.float()).sum(dim=0)
+        count = sign_mask.float().sum(dim=0).clamp(min=1)
+        merged_lora_B = (aligned_sum / count).reshape(module.lora_B[adapter_names[0]].weight.data.shape)
+        
+        lora_A_list = [module.lora_A[name].weight.data.clone() for name in adapter_names]
+        merged_lora_A = torch.stack(lora_A_list, dim=0).mean(dim=0)
+        
+        module.lora_A[adapter_names[0]].weight.data.copy_(merged_lora_A)
+        module.lora_B[adapter_names[0]].weight.data.copy_(merged_lora_B)
+        
+
 
 def predict_dialogue_llm(model, tokenizer, generation_config, input):
     model.eval()

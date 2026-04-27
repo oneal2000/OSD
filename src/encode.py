@@ -93,11 +93,9 @@ def get_train_data(augments, tokenizer, args):
                                                         None, 
                                                         dia["output"]))
         else:
-            qas = aug["qa"]
-            fcs = aug["fact_checking"]
-            sfs = aug["slot_filling"]
-            qpa_cnt = (len(qas) + 1) // 2
             if args.task_type == "open_domain_qa":
+                qas = aug["qa"]
+                qpa_cnt = (len(qas) + 1) // 2
                 for qid, qa in enumerate(qas):
                     if qid < qpa_cnt:
                         for ppp in [psg, rew]:
@@ -111,6 +109,8 @@ def get_train_data(augments, tokenizer, args):
                                                             qa["answer"] if not args.with_cot else qa["full_answer"], 
                                                             with_cot=args.with_cot))
             elif args.task_type == "fact_checking":
+                fcs = aug["fact_checking"]
+                qpa_cnt = (len(fcs) + 1) // 2
                 for fid, fc in enumerate(fcs):
                     if fid < qpa_cnt:
                         for ppp in [psg, rew]:
@@ -122,6 +122,8 @@ def get_train_data(augments, tokenizer, args):
                                                             None, 
                                                             fc["output"]))
             elif args.task_type == "slot_filling":
+                sfs = aug["slot_filling"]
+                qpa_cnt = (len(sfs) + 1) // 2
                 for sid, sf in enumerate(sfs):
                     # print(type(sf["template_question"]), sf["template_question"])
                     if sid < qpa_cnt:
@@ -134,7 +136,7 @@ def get_train_data(augments, tokenizer, args):
                         prompt_ids.append(get_prompt_sf(tokenizer, sf["input"], 
                                                             sf["template_question"], None,
                                                             sf["output"]))
-            elif args.task_type == "pubmedqa":
+            elif args.task_type == "med_verify":
                 pubqas = aug["pubmedqa"]
                 qpa_cnt = (len(pubqas) + 1) // 2
 
@@ -192,21 +194,27 @@ def train(question, augments, args, model, tokenizer,
 
 
 def main(args):
-    if args.dataset in ["fever", "zeroshot_re", "triviaqa"]:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt_3.json")
+    # if args.dataset in ["fever", "zeroshot_re", "triviaqa"]:
+    #     data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+    #     aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt_3.json")
+    if args.dataset == "fever":
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "fever_top10.json")
+    elif args.dataset == "zeroshot_re":
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "zsre_top10.json")
     elif args.dataset == "wow":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow_top10.json")
     elif args.dataset == "test":
         data_dir = os.path.join(ROOT_DIR, "data_ret_test", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "test.json")
     elif args.dataset == "pubmedqa":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "pub_3.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub10", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "med_top10.json")
     else:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr_3.json")
+        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr10", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr_top10.json")
     data_list = load_data(None, None, None, data_dir=data_dir)
 
     with open(aug_file, "r", encoding="utf-8") as f:
@@ -291,7 +299,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--task_type", type=str, default="open_domain_qa", choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "pubmedqa"])
+    parser.add_argument("--task_type", type=str, default="open_domain_qa", choices=["open_domain_qa", "fact_checking", "slot_filling", "dialogue", "med_verify"])
     parser.add_argument("--with_cot", action="store_true")
     parser.add_argument("--sample", type=int, default=-1) # -1 means all
     # Train
