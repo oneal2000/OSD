@@ -2,7 +2,7 @@
 python src/inference.py \
     --model_name llama3.2-1b-instruct \
     --dataset 2wikimultihopqa \
-    --task_type opne_domain_qa \
+    --task_type open_domain_qa \
     --with_cot \
     --inference_method D-PRAG \
     --max_new_tokens 128
@@ -11,7 +11,7 @@ python src/inference.py \
 python src/inference.py \
     --model_name llama3.2-1b-instruct \
     --dataset hotpotqa \
-    --task_type opne_domain_qa \
+    --task_type open_domain_qa \
     --with_cot \
     --inference_method D-PRAG \
     --max_new_tokens 128
@@ -20,7 +20,7 @@ python src/inference.py \
 python src/inference.py \
     --model_name llama3.2-1b-instruct \
     --dataset complexwebquestions \
-    --task_type opne_domain_qa \
+    --task_type open_domain_qa \
     --inference_method D-PRAG \
     --max_new_tokens 20
 
@@ -28,8 +28,8 @@ python src/inference.py \
 python src/inference.py \
     --model_name llama3.2-1b-instruct \
     --dataset popqa \
-    --task_type opne_domain_qa \
-    --epoch 2 \
+    --task_type open_domain_qa \
+    --num_train_epochs 2 \
     --inference_method D-PRAG \
     --max_new_tokens 20
 
@@ -46,7 +46,7 @@ python src/inference.py \
     --model_name llama3.2-1b-instruct \
     --dataset zero_shot_re \
     --task_type slot_filling \
-    --epoch 2 \
+    --num_train_epochs 2 \
     --inference_method D-PRAG \
     --max_new_tokens 20
 
@@ -55,7 +55,7 @@ python src/inference.py \
     --model_name llama3.2-1b-instruct \
     --dataset wow \
     --task_type dialogue \
-    --epoch 2 \
+    --num_train_epochs 2 \
     --inference_method D-PRAG \
     --max_new_tokens 32
 

@@ -136,7 +136,5 @@ The detailed instructions we use in our experiment for training Doc LoRA with so
 By calling `src/inference.py`, you can evaluate the performance of D-PRAG, D-PRAG-hard and other baselines. The results will be saved in `output`.   
 The detailed instructions we use in our experiment for inference can be found in [scripts](./scripts/infer). You need to change the `doc_num` in the instruction to specify the number of retrieved passages you want to use for inference and `iinference_method` to specify the inference method you want to use.   
 
-If you want to test the parameter sparsification method we report in our paper, you should set `ties_topk` to 60.0 in 1B models and 80.0 in 3B and 8B models.    
-
 
 If you have any questions about the code or encounter any issues when reproducing our results, please feel free to open an issue in this repository. We will do our best to help you resolve the problems and successfully reproduce our results!

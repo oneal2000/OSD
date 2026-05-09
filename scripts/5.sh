@@ -1,0 +1,2 @@
+CUDA_VISIBLE_DEVICES=2,3,7 python src/encode_doc.py --model_name llama3.1-8b-instruct --dataset 2wikimultihopqa --task_type open_domain_qa --with_cot --block_size 1500
+CUDA_VISIBLE_DEVICES=2,3,7 python src/encode_doc.py --model_name llama3.1-8b-instruct --dataset hotpotqa --task_type open_domain_qa --with_cot --block_size 1500 

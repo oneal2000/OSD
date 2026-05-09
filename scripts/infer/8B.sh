@@ -2,8 +2,7 @@
 python src/inference.py \
     --model_name llama3.1-8b-instruct \
     --dataset 2wikimultihopqa \
-    --task_type opne_domain_qa \
-    --lambda_orth 0.2 \
+    --task_type open_domain_qa \
     --with_cot \
     --inference_method D-PRAG \
     --max_new_tokens 128
@@ -12,8 +11,7 @@ python src/inference.py \
 python src/inference.py \
     --model_name llama3.1-8b-instruct \
     --dataset hotpotqa \
-    --task_type opne_domain_qa \
-    --lambda_orth 0.2 \
+    --task_type open_domain_qa \
     --with_cot \
     --inference_method D-PRAG \
     --max_new_tokens 128
@@ -22,8 +20,7 @@ python src/inference.py \
 python src/inference.py \
     --model_name llama3.1-8b-instruct \
     --dataset complexwebquestions \
-    --task_type opne_domain_qa \
-    --lambda_orth 0.2 \
+    --task_type open_domain_qa \
     --inference_method D-PRAG \
     --max_new_tokens 20
 
@@ -31,9 +28,8 @@ python src/inference.py \
 python src/inference.py \
     --model_name llama3.1-8b-instruct \
     --dataset popqa \
-    --task_type opne_domain_qa \
-    --epoch 2 \
-    --lambda_orth 0.2 \
+    --task_type open_domain_qa \
+    --num_train_epochs 2 \
     --inference_method D-PRAG \
     --max_new_tokens 20
 
@@ -43,7 +39,6 @@ python src/inference.py \
     --dataset fever \
     --task_type fact_checking \
     --learning_rate 5e-5 \
-    --lambda_orth 0.2 \
     --inference_method D-PRAG \
     --max_new_tokens 20
 
@@ -52,9 +47,8 @@ python src/inference.py \
     --model_name llama3.1-8b-instruct \
     --dataset zero_shot_re \
     --task_type slot_filling \
-    --epoch 2 \
+    --num_train_epochs 2 \
     --learning_rate 5e-4 \
-    --lambda_orth 0.2 \
     --inference_method D-PRAG \
     --max_new_tokens 20
 
@@ -63,8 +57,7 @@ python src/inference.py \
     --model_name llama3.1-8b-instruct \
     --dataset wow \
     --task_type dialogue \
-    --epoch 2 \
-    --lambda_orth 0.2 \
+    --num_train_epochs 2 \
     --inference_method D-PRAG \
     --max_new_tokens 32
 
@@ -73,6 +66,5 @@ python src/inference.py \
     --model_name llama3.1-8b-instruct \
     --dataset pubmedqa \
     --task_type med_verify \
-    --lambda_orth 0.2 \
     --inference_method D-PRAG \
     --max_new_tokens 20

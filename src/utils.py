@@ -75,7 +75,7 @@ class BaseDataset:
         return final_metric
 
 
-def load_data(data_name, data_type, model_name, data_dir=None):
+def load_data(data_name, model_name, data_type, data_dir=None):
     solve_dataset = []
     if data_dir is None:
         input_dir = os.path.join(DATA_ROOT_DIR, data_name, model_name)
@@ -124,7 +124,7 @@ def load_data(data_name, data_type, model_name, data_dir=None):
 
 def get_model_path(model_name):
     if model_name == "llama3.1-8b-instruct": 
-        return "meta-llama/Meta-Llama-3.1-8B-Instruct"
+        return "meta-llama/Llama-3.1-8B-Instruct"
     elif model_name == "llama3-8b-instruct": 
         return "meta-llama/Llama-3-8B-Instruct"
     elif model_name == "llama3.2-3b-instruct":

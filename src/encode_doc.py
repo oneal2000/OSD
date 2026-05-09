@@ -49,7 +49,7 @@ class TrainingData(Dataset):
             })
 
         self.total_len = len(self.dataset)
-        print(f"Processed {self.total_len} samples. Max sequence length: {self.max_raw_len}")
+        # print(f"Processed {self.total_len} samples. Max sequence length: {self.max_raw_len}")
 
     def __len__(self):
         return len(self.dataset)
@@ -242,12 +242,20 @@ def orthogonal_loss(model, task_lora_params):
         doc_flat = doc_param.view(doc_param.size(0), -1)
         task_flat = task_param.view(task_param.size(0), -1)
         assert doc_flat.shape == task_flat.shape, f"Shape mismatch: {doc_flat.shape} vs {task_flat.shape}"
-        doc_result = doc_flat @ doc_flat.T
-        task_result = task_flat @ task_flat.T
-        current_loss = torch.trace(doc_result @ task_result)
+        current_loss = torch.trace(task_flat @ doc_flat.T @ doc_flat @ task_flat.T)
         loss = loss + current_loss
 
     return loss
+
+def _global_grad_norm_from_grads(grads) -> float:
+    sq_sum = 0.0
+    for g in grads:
+        if g is None:
+            continue
+        n = g.detach().norm(2).item()
+        sq_sum += n * n
+    return float(sq_sum ** 0.5)
+
 
 def train(model, augments,  tokenizer, args, 
           init_adapter_path, save_path, task_lora_params):
@@ -302,6 +310,59 @@ def train(model, augments,  tokenizer, args,
                 "ortho_loss": f"{ortho.item():.4f}",
                 "total_loss": f"{loss.item():.4f}"
             })
+    # trainable_params = [p for p in model.parameters() if p.requires_grad]
+
+    # for epoch in range(args.num_train_epochs):
+    #     loop = tqdm(train_dataloader, desc=f"Epoch {epoch+1}")
+    #     for step, batch in enumerate(loop):
+    #         optimizer.zero_grad()
+    #         outputs = model(**batch)
+
+    #         out_loss = outputs.loss
+    #         ortho = orthogonal_loss(model, task_lora_params)
+
+    #         if epoch == 0 and step == 0:
+    #             grads_out = torch.autograd.grad(
+    #                 out_loss, trainable_params, retain_graph=True, allow_unused=True
+    #             )
+    #             norm_out = _global_grad_norm_from_grads(grads_out)
+
+    #             grads_ortho = torch.autograd.grad(
+    #                 ortho, trainable_params, retain_graph=True, allow_unused=True
+    #             )
+    #             norm_ortho = _global_grad_norm_from_grads(grads_ortho)
+
+    #             print(f"\n" + "="*50)
+    #             print(f"[Gradient Probe]")
+    #             print(f"CE Loss:    {out_loss.item():.6f}  =>  CE Grad Norm:    {norm_out:.6f}")
+    #             print(f"Ortho Loss: {ortho.item():.6f}  =>  Ortho Grad Norm: {norm_ortho:.6f}")
+
+    #             suggested_ratio = norm_out / (norm_ortho + 1e-8)
+    #             print(f" 1:1  (CE_Norm / Ortho_Norm): {suggested_ratio:.6f}")
+    #             print(f"current lambda_orth: {args.lambda_orth}")
+    #             print(f"lambda_orth (10%~20%): {suggested_ratio * 0.15:.6f}")
+    #             print("="*50 + "\n")
+
+    #         loss = out_loss + args.lambda_orth * ortho
+    #         # loss = out_loss
+
+    #         if first_out_loss is None and first_ortho_loss is None:
+    #             first_out_loss = out_loss.item()
+    #             first_ortho_loss = ortho.item()
+
+    #         out_loss_hist.append(out_loss.item())
+    #         ortho_loss_hist.append(ortho.item())
+
+    #         loss.backward()
+    #         optimizer.step()
+
+    #         loop.set_postfix({
+    #             "out_loss": f"{out_loss.item():.4f}",
+    #             "ortho_loss": f"{ortho.item():.4f}",
+    #             "total_loss": f"{loss.item():.4f}"
+    #         })
+
+
     os.makedirs(save_path, exist_ok=True)
     model.save_pretrained(save_path)
     model = model.unload()
@@ -312,33 +373,33 @@ def train(model, augments,  tokenizer, args,
 
 def main(args):
     if args.dataset == "fever":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
         kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
         if os.path.exists(kilt_aug_file):
             aug_file = kilt_aug_file
         else:
             aug_file = os.path.join(ROOT_DIR, "doc_aug", "fever.json")
     elif args.dataset == "zeroshot_re":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
         kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
         if os.path.exists(kilt_aug_file):
             aug_file = kilt_aug_file
         else:
             aug_file = os.path.join(ROOT_DIR, "doc_aug", "zsre.json")
     elif args.dataset == "wow":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_kilt10", args.dataset)
         kilt_aug_file = os.path.join(ROOT_DIR, "doc_aug", "kilt.json")
         if os.path.exists(kilt_aug_file):
             aug_file = kilt_aug_file
         else:
             aug_file = os.path.join(ROOT_DIR, "doc_aug", "wow.json")
     elif args.dataset == "pubmedqa":
-        data_dir = os.path.join(ROOT_DIR, "data_ret_pub", args.dataset)
-        aug_file = os.path.join(ROOT_DIR, "doc_aug", "pub.json") 
+        data_dir = os.path.join(ROOT_DIR, "data_ret_pub10", args.dataset)
+        aug_file = os.path.join(ROOT_DIR, "doc_aug", "med.json") 
     else:
-        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr", args.dataset)
+        data_dir = os.path.join(ROOT_DIR, "data_ret_dpr10", args.dataset)
         aug_file = os.path.join(ROOT_DIR, "doc_aug", "dpr.json")
-    data_list = load_data(None, None, None, data_dir=data_dir)
+    data_list = load_data(None, None, data_type="total", data_dir=data_dir)
 
     with open(aug_file, "r", encoding="utf-8") as f:
         aug_data_list = json.load(f)
@@ -508,8 +569,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--lora_rank", type=int, default=2)
     parser.add_argument("--lora_alpha", type=int, default=32)
-    parser.add_argument("--lambda_orth", type=float, default=0.1)
-    parser.add_argument("--task_LoRA_type", type=str, choices=["strong", "weak"], default="weak")
+    parser.add_argument("--lambda_orth", type=float, default=10.0)
     parser.add_argument("--block_size", type=int, default=500)
     args = parser.parse_args()
     print(args)
