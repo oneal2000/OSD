@@ -3,7 +3,6 @@ __pycache__/
 log.txt
 *.log
 .DS_Store
-scripts/tmp
 
 base_weight*/
 doc_aug*/
